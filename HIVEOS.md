@@ -15,7 +15,7 @@ FFGT (FreeForGem Ting) mines **Daler (DLR)** on the **Ting** blockchain on NVIDI
 - A Ting account (64 hex characters) to receive DLR: create it with the Ting ID Android app (it is not in Google Play: install
   `Ting-ID.apk` from [ting-id releases](https://github.com/ting-organization/ting-id/releases)), with the web wallet
   [wallet.ting-project.com](https://wallet.ting-project.com), or with `ting wallet create` of
-  [ting-miner](https://github.com/ting-organization/ting-miner). In Ting ID / the web wallet use the **Spending** account
+  [ting-miner](https://github.com/ting-organization/ting-miner). In Ting ID / the web wallet use the **Spending** account — only the 64 hex characters, without `&net=…` that the app adds to a shared address —
   (Receive) and add the 12-word recovery phrase in Identity (it becomes active after 7 days). A `ting wallet create` account
   is a `wallet.json` file with a password (no phrase; keep both safe — nobody can restore them); it cannot be imported into
   Ting ID or the web wallet, its DLR are sent only with `ting wallet send` through a node. To use
@@ -45,9 +45,10 @@ on a backup.
 
 | Card | Recommended |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (best GH/W), add `--auto-uv` for an automatic undervolt |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --lock-mclock 810 --auto-uv` (best GH/W; the memory lock saves ~13 W on a 3070 at the same hash rate) |
 | any NVIDIA, max speed | nothing (stock clocks) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 is a bit more efficient) |
+| RTX 20xx (Turing) | `--lock-cclock 1500 --lock-mclock 810 --auto-uv --uv-max 225` (0.2.0 lets the undervolt climb too far on Turing without `--uv-max 225`) |
 | AMD | nothing (`--backend opencl` is chosen automatically when there is no NVIDIA GPU) |
 
 Flags set here win over the HiveOS OC profile (a locked clock in the miner is re-applied if HiveOS changes it), and every
@@ -95,7 +96,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
   `Ting-ID.apk` — на странице [релизов ting-id](https://github.com/ting-organization/ting-id/releases)), в веб-кошельке
   [wallet.ting-project.com](https://wallet.ting-project.com) или командой `ting wallet create` из
   [ting-miner](https://github.com/ting-organization/ting-miner). В Ting ID и веб-кошельке берите счёт **Spending** (кнопка
-  Receive) и сразу добавьте фразу из 12 слов во вкладке Identity (она начинает действовать через 7 дней). Аккаунт от
+  Receive) — только 64 символа, без хвоста `&net=…`, и сразу добавьте фразу из 12 слов во вкладке Identity (она начинает действовать через 7 дней). Аккаунт от
   `ting wallet create` — это файл `wallet.json` с паролем (фразы нет; храните оба надёжно — восстановить нельзя); в Ting ID и
   веб-кошелёк он не импортируется, его DLR отправляются только командой `ting wallet send` через ноду. Для обмена в
   [Ting Swap](https://ting-organization.github.io/ting-swap/) (атомарный своп DLR ↔ LTC, ранняя версия) нужен Ting ID или
@@ -124,9 +125,10 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 
 | Карта | Рекомендация |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (лучшие GH/W), плюс `--auto-uv` — автоматический андервольт |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --lock-mclock 810 --auto-uv` (лучшие GH/W; лок памяти экономит ~13 Вт на 3070 при том же хешрейте) |
 | любая NVIDIA, максимум скорости | ничего (стоковые частоты) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 чуть экономичнее) |
+| RTX 20xx (Turing) | `--lock-cclock 1500 --lock-mclock 810 --auto-uv --uv-max 225` (в 0.2.0 без `--uv-max 225` андервольт на Turing заходит слишком далеко) |
 | AMD | ничего (`--backend opencl` выбирается сам, если NVIDIA нет) |
 
 Флаги майнера главнее OC-профиля HiveOS (лок частоты возвращается, если HiveOS его поменял); все частоты и оффсеты
