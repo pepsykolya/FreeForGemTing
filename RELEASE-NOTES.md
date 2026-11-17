@@ -1,4 +1,52 @@
-# FFGT 0.2.0 — release notes (DRAFT, not published)
+# FFGT — release notes
+
+# FFGT 0.2.1
+
+## English
+
+Fixes and power saving on top of 0.2.0.
+
+- **Memory lock by default (NVIDIA)**: the miner locks the video memory at the lowest clock that keeps the full core clock
+  range (SHA-256 does not use the video memory). RTX 3070, lock 1800 + `--auto-uv`, solo: **128.9 W → 115.5 W at the same
+  5.14 GH/s** (memory 810 MHz instead of 6801), about −10 % power. Not applied with `--lock-mclock` / `--moffset`, or when
+  the HiveOS OC profile locks the memory; `--no-mem-lock` leaves the memory alone. The old advice `--lock-mclock 810` is
+  no longer needed.
+- **`--auto-uv` ceiling per card type** instead of +495 for every card: Turing (RTX 20, GTX 16) +225, CMP 50HX +330,
+  CMP 30HX / 40HX +150, other cards +495. In 0.2.0 the tuner could take an RTX 2060 SUPER to +260 and crash the driver
+  (with 0.2.0 use `--uv-max 225` on Turing).
+- **Wallet**: a `&net=…` tail (the Ting ID app copies the account with it) and a `ting:` prefix are cut off. With the
+  tail the pool closed the connection and the miner showed 0 GH/s.
+- **CPU**: GPU threads sleep while the GPU computes (blocking sync) instead of spinning: ~98 % → ~1 % of a CPU core
+  per GPU at the same hash rate (a 2-core rig with 12 GPUs was at 100 % CPU); `FFGT_SPIN=1` restores spinning.
+- Efficiency is shown in **GH/W** everywhere (HiveOS stats, log, API).
+- Docs: Ting ID — APK from GitHub (not in Google Play) and the web wallet wallet.ting-project.com; the HiveOS
+  "Hash algorithm" field stays empty; memory lock and Turing rows.
+
+**Files**: `ffgt-0.2.1_hiveos.tar.gz` (HiveOS), `ffgt-0.2.1-linux-x86_64.tar.gz`, `ffgt-0.2.1-windows-x64.zip`,
+`SHA256SUMS`. HiveOS install URL:
+`https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.1/ffgt-0.2.1_hiveos.tar.gz`
+
+## Русский
+
+Исправления и экономия мощности поверх 0.2.0.
+
+- **Лок памяти по умолчанию (NVIDIA)**: майнер лочит видеопамять на самой низкой частоте, при которой карта сохраняет
+  полный диапазон частот ядра (SHA-256 видеопамять не использует). RTX 3070, лок 1800 + `--auto-uv`, соло: **128,9 Вт →
+  115,5 Вт при тех же 5,14 GH/s** (память 810 МГц вместо 6801), около −10 % мощности. Не ставится при `--lock-mclock` /
+  `--moffset` или если память лочит OC-профиль HiveOS; `--no-mem-lock` — память не трогать. Совет `--lock-mclock 810`
+  больше не нужен.
+- **Потолок `--auto-uv` по типу карты** вместо +495 для всех: Turing (RTX 20, GTX 16) +225, CMP 50HX +330, CMP 30HX /
+  40HX +150, остальные +495. В 0.2.0 подбор мог довести RTX 2060 SUPER до +260 и уронить драйвер (в 0.2.0 на Turing —
+  `--uv-max 225`).
+- **Кошелёк**: хвост `&net=…` (так адрес копирует Ting ID) и префикс `ting:` отрезаются. С хвостом пул рвал соединение,
+  майнер показывал 0 GH/s.
+- **CPU**: потоки GPU спят, пока карта считает (blocking sync), а не крутятся в ожидании: ~98 % → ~1 % ядра CPU на
+  карту при том же хешрейте (риг на 2-ядерном CPU с 12 картами был загружен на 100 %); `FFGT_SPIN=1` — вернуть старое.
+- Эффективность везде в **GH/W** (статистика HiveOS, лог, API).
+- Доки: Ting ID — APK с GitHub (в Google Play нет) и веб-кошелёк wallet.ting-project.com; поле «Hash algorithm» в HiveOS
+  оставлять пустым; строки про лок памяти и Turing.
+
+# FFGT 0.2.0
 
 ## English
 
@@ -13,7 +61,7 @@ First public release of **FFGT (FreeForGem Ting)**: a GPU miner for **Daler (DLR
 
 **Measured** (pool mining, kernel t1p unless noted)
 
-| GPU | Settings | GH/s | W | GH/J |
+| GPU | Settings | GH/s | W | GH/W |
 |---|---|---:|---:|---:|
 | RTX 3070 ×4 (HiveOS) | lock 1500 + `--auto-uv` | 4.06–4.09 each, 16.3 total | 248 total | 0.066 |
 | RTX 3070 | lock 1500, no undervolt | 4.06 | 99 | 0.041 |

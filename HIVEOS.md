@@ -45,11 +45,16 @@ on a backup.
 
 | Card | Recommended |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --lock-mclock 810 --auto-uv` (best GH/W; the memory lock saves ~13 W on a 3070 at the same hash rate) |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --auto-uv` (best GH/W) |
 | any NVIDIA, max speed | nothing (stock clocks) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 is a bit more efficient) |
-| RTX 20xx (Turing) | `--lock-cclock 1500 --lock-mclock 810 --auto-uv --uv-max 225` (0.2.0 lets the undervolt climb too far on Turing without `--uv-max 225`) |
+| RTX 20xx (Turing) | `--lock-cclock 1500 --auto-uv` (0.2.1 caps the undervolt at +225 on Turing by itself; with 0.2.0 add `--uv-max 225` and `--lock-mclock 810`) |
 | AMD | nothing (`--backend opencl` is chosen automatically when there is no NVIDIA GPU) |
+
+**Memory lock is automatic (0.2.1)**: on NVIDIA the miner locks the video memory at the lowest clock that keeps the full
+core clock range (810 MHz on an RTX 3070). SHA-256 does not use the video memory, so the hash rate stays the same and the
+card draws less: RTX 3070 at a 1800 lock + `--auto-uv` 129 → 115.5 W at the same 5.14 GH/s. It is skipped when you set
+`--lock-mclock` / `--moffset` yourself or the HiveOS OC profile locks the memory; `--no-mem-lock` leaves the memory alone.
 
 Flags set here win over the HiveOS OC profile (a locked clock in the miner is re-applied if HiveOS changes it), and every
 clock / offset is put back when the miner stops.
@@ -80,7 +85,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 ### 5. Check
 
 - HiveOS shows the hash rate in GH/s (as kH/s × 10⁶ internally), accepted / rejected shares and the efficiency next to
-  the version (`0.2.0 0.0610 GH/W`).
+  the version (`0.2.1 0.0610 GH/W`).
 - Miner log: `miner log` or `/var/log/miner/ffgt/ffgt.log`; the line every 10 s:
   `[ 60s] GPU0 4.273 (70 W, 0.0610 GH/W) ... | total ... | user sub 9 acc 9 rej 0 ... | fee sub 0 acc 0 rej 0`.
 - Pool statistics: `https://crypto-connection.net` → Daler → your account. Minimum payout 100 DLR, after 30 confirmations.
@@ -125,11 +130,16 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 
 | Карта | Рекомендация |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --lock-mclock 810 --auto-uv` (лучшие GH/W; лок памяти экономит ~13 Вт на 3070 при том же хешрейте) |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500 --auto-uv` (лучшие GH/W) |
 | любая NVIDIA, максимум скорости | ничего (стоковые частоты) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 чуть экономичнее) |
-| RTX 20xx (Turing) | `--lock-cclock 1500 --lock-mclock 810 --auto-uv --uv-max 225` (в 0.2.0 без `--uv-max 225` андервольт на Turing заходит слишком далеко) |
+| RTX 20xx (Turing) | `--lock-cclock 1500 --auto-uv` (0.2.1 сам ограничивает андервольт на Turing до +225; в 0.2.0 добавьте `--uv-max 225` и `--lock-mclock 810`) |
 | AMD | ничего (`--backend opencl` выбирается сам, если NVIDIA нет) |
+
+**Лок памяти — автоматически (0.2.1)**: на NVIDIA майнер лочит видеопамять на самой низкой частоте, при которой карта
+сохраняет полный диапазон частот ядра (на RTX 3070 — 810 МГц). SHA-256 видеопамять не использует, поэтому хешрейт тот же,
+а мощность ниже: RTX 3070 на локе 1800 + `--auto-uv` 129 → 115,5 Вт при тех же 5,14 GH/s. Не ставится, если вы сами
+задали `--lock-mclock` / `--moffset` или память лочит OC-профиль HiveOS; `--no-mem-lock` — память не трогать.
 
 Флаги майнера главнее OC-профиля HiveOS (лок частоты возвращается, если HiveOS его поменял); все частоты и оффсеты
 возвращаются как были при остановке майнера.
@@ -160,7 +170,7 @@ Vulkan-библиотеки драйвера).
 
 ### 5. Проверка
 
-- HiveOS показывает хешрейт в GH/s, принятые/отклонённые шары и эффективность рядом с версией (`0.2.0 0.0610 GH/W`).
+- HiveOS показывает хешрейт в GH/s, принятые/отклонённые шары и эффективность рядом с версией (`0.2.1 0.0610 GH/W`).
 - Лог майнера: `miner log` или `/var/log/miner/ffgt/ffgt.log`; строка раз в 10 с:
   `[ 60s] GPU0 4.273 (70 W, 0.0610 GH/W) ... | total ... | user sub 9 acc 9 rej 0 ... | fee sub 0 acc 0 rej 0`.
 - Статистика пула: `https://crypto-connection.net` → Daler → ваш аккаунт. Минимальная выплата 100 DLR, после 30 подтверждений.

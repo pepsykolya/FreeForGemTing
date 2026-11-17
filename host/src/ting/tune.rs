@@ -760,7 +760,14 @@ pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::
             lg(format!("GPU{} (bus {}): the core offset cannot be set ({e:#}); not tuned (Linux: root, Windows: Run as administrator)", r.dev, uv::short_bus(&r.bus)));
             continue;
         }
-        let max = o.max_offset.get(i).unwrap_or(DEF_MAX).min(uv::HARD_CAP).min(hi);
+        // per-card default ceiling (Turing RTX 20 / GTX 16 +225, CMP 50HX +330, CMP 30/40HX +150, others +495) unless --uv-max
+        // says otherwise: 0.2.0 used +495 for every card, which let a 2060 SUPER rig climb to +260 (owner's friend, 17.11)
+        let name = nv.name(d).unwrap_or_else(|_| gpu::device_name(r.dev));
+        let def = uv::card_defaults(&name, nv.compute_capability(d), nv.pci_device_id(d));
+        let max = o.max_offset.get(i).unwrap_or(def.max).min(uv::HARD_CAP).min(hi);
+        if o.max_offset.get(i).is_none() && def.max < DEF_MAX {
+            lg(format!("GPU{} (bus {}, {name}): undervolt ceiling +{} ({}; --uv-max to change)", r.dev, uv::short_bus(&r.bus), def.max, def.max_src));
+        }
         nv.watch_xid(d);
         let uuid = nv.uuid(d).unwrap_or_else(|_| r.bus.clone());
         v.push(Arc::new(Card {

@@ -548,8 +548,8 @@ fn spawn_lock_keeper() {
     });
 }
 
-/// Core lock (MHz) with the best Pearl TMAC/J on RTX 30 (Ampere).  Source: RTX 3070 frequency sweeps (pearl-miner JOURNAL, night 10):
-/// 1530 MHz = -1.9% speed, -5.4% power, +3.6% TMAC/J against 1560; 1515 and below is a plateau.  Only a hint: nothing is set.
+/// Core lock (MHz) with the best Pearl TMAC/W on RTX 30 (Ampere).  Source: RTX 3070 frequency sweeps (pearl-miner JOURNAL, night 10):
+/// 1530 MHz = -1.9% speed, -5.4% power, +3.6% TMAC/W against 1560; 1515 and below is a plateau.  Only a hint: nothing is set.
 pub const AMPERE_PEARL_LOCK: u32 = 1530;
 
 /// PCI bus id of a device ordinal: from the library of the coin that is mining (set by `set_bus_resolver`: proxgpu / noidgpu), else
@@ -587,7 +587,7 @@ pub fn hint_ampere(devices: &[i32], locks: &[Option<u32>]) {
     }
     if !gpus.is_empty() {
         lg(format!(
-            "hint: for better TMAC/W on RTX 30 try --lock-cclock {AMPERE_PEARL_LOCK} ({}: no lock or above {AMPERE_PEARL_LOCK} MHz); about +3.6% TMAC/J for -1.9% speed against 1560 (RTX 3070); auto-uv tunes a new lock from the profile of a higher one",
+            "hint: for better TMAC/W on RTX 30 try --lock-cclock {AMPERE_PEARL_LOCK} ({}: no lock or above {AMPERE_PEARL_LOCK} MHz); about +3.6% TMAC/W for -1.9% speed against 1560 (RTX 3070); auto-uv tunes a new lock from the profile of a higher one",
             gpus.join(", ")
         ));
     }

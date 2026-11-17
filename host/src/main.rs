@@ -1094,7 +1094,7 @@ OPTIONS:
     --uv-reval-hours H   re-validate the undervolt every H hours while mining (default 6, 0 = never)
     --auto-uv-dry-run    only log which GPUs --auto-uv would change; changes nothing
     --lock-cclock N      lock the core clock to N MHz (one value for all, or one per device in --devices order); needs root/Administrator
-                         Pearl on RTX 30: about 1530 gives the best TMAC/J (+3.6% for -1.9% speed against 1560); the log hints at it
+                         Pearl on RTX 30: about 1530 gives the best TMAC/W (+3.6% for -1.9% speed against 1560); the log hints at it
                          when an RTX 30 runs without a lock or above 1530. auto-uv profiles are per lock: a new lock is tuned anew
     --lock-mclock N      lock the memory clock to N MHz (same syntax)
     --moffset N          memory clock offset in MHz, may be negative (same syntax; needs driver 555+)
@@ -1690,7 +1690,7 @@ fn real_main() -> Result<()> {
         ensure!(!a.pool_given || a.node.is_none(), "--pool (pool / ffgt-gate) and --node (solo on a local node) exclude each other");
         return ting::mine(ting::Opts {
             pools: if a.pool_given { a.pools.clone() } else { vec![] },
-            account: a.wallet.trim().split('.').next().unwrap_or("").to_string(),
+            account: ting::clean_account(a.wallet.trim().split('.').next().unwrap_or("")),
             worker: if a.wallet.contains('.') { a.wallet.trim().rsplit_once('.').unwrap().1.to_string() } else { a.worker.clone() },
             password: a.password.clone(),
             failback_min: crate::failover::opts().failback_min,
@@ -1705,6 +1705,7 @@ fn real_main() -> Result<()> {
             lock_cclock: a.lock_cclock,
             lock_mclock: a.lock_mclock,
             moffset: a.moffset,
+            no_mem_lock: a.no_mem_lock,
             temp: a.temp,
             uv: a.uv,
         });

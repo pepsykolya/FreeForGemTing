@@ -15,6 +15,7 @@ NVIDIA (CUDA, GTX 10 / sm_61 and newer, incl. CMP) and AMD (OpenCL). Linux, Hive
   its payout account; the node's control token never leaves the node's machine.
 - The FreeForGem toolbox: clock locks that win over the HiveOS OC profile and are put back on exit, automatic undervolt
   per GPU and lock (`--auto-uv`, every step checked by a separate process), automatic lock choice (`--auto-lock`),
+  automatic memory lock (the lowest memory clock that keeps the full core range: about -10 % power at the same hash rate),
   temperature limit, recovery after a GPU fault or a hung GPU call, per-GPU settings, local API.
 
 ## Quick start
@@ -39,6 +40,7 @@ A Ting account is 64 hex characters: Ting ID Android app (APK from https://githu
 --gate CONFIG.json      run ffgt-gate (see below)
 --devices 0,2           GPUs (default all, nvidia-smi numbering);  --backend cuda|opencl
 --lock-cclock MHz       core lock (one value or one per GPU);  --lock-mclock MHz;  --moffset MHz
+--no-mem-lock           leave the memory clock alone (default on NVIDIA: the lowest memory clock that keeps the full core range)
 --auto-uv               undervolt tuner (profiles per GPU and lock);  --uv-offset N;  --uv-reset / --uv-reset-all
 --auto-lock             choose the lock by measurement;  --auto-lock-range 1650,1500,1350
 --temp-limit C          slow a GPU down above C;  --temp-stop C
@@ -88,7 +90,8 @@ HiveOS, Windows. Комиссия разработчика **1 %**.
 - Соло: напрямую на свою ноду Ting (`--node`) или несколько ригов через **ffgt-gate** — каждый риг к своей ноде и её
   аккаунту выплат; токен управления нодой не покидает её машину.
 - Набор FreeForGem: локи частот главнее OC-профиля HiveOS и возвращаются при выходе, автоандервольт по карте и локу
-  (`--auto-uv`, каждый шаг проверяется отдельным процессом), автовыбор лока (`--auto-lock`), лимит температуры,
+  (`--auto-uv`, каждый шаг проверяется отдельным процессом), автовыбор лока (`--auto-lock`), автоматический
+  лок памяти (самая низкая частота памяти с полным диапазоном ядра: около −10 % мощности при том же хешрейте), лимит температуры,
   восстановление после сбоя GPU или зависшего вызова, настройки по картам, локальный API.
 
 ## Быстрый старт

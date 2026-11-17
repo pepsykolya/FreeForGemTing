@@ -38,6 +38,7 @@ pub struct Opts {
     pub lock_cclock: Option<String>,
     pub lock_mclock: Option<String>,
     pub moffset: Option<String>,
+    pub no_mem_lock: bool, // --no-mem-lock: leave the memory clock alone (default 0.2.1: the lowest one that keeps the full core range)
     pub temp: crate::templimit::Opts,
     pub uv: crate::uv::Opts,
     /// pool mode: the --pool entries (empty = solo on the node); login ACCOUNT.worker, password
@@ -220,7 +221,7 @@ pub fn hash_bench(devices: &Option<Vec<i32>>, backend: Option<gpu::Backend>, sec
     for r in res {
         let (d, hs, w, clk) = r?;
         tot += hs;
-        let pw = w.map_or(String::new(), |w| format!("  {w:.0} W  {:.4} GH/J", hs / 1e9 / w));
+        let pw = w.map_or(String::new(), |w| format!("  {w:.0} W  {:.4} GH/W", hs / 1e9 / w));
         let c = clk.map_or(String::new(), |c| format!("  {c} MHz"));
         println!("hash-bench GPU{d} {} ({:?} kernel {}): {:.3} GH/s{pw}{c}", gpu::device_name(d), gpu::backend(), gpu::kernel_name(d), hs / 1e9);
     }
@@ -426,6 +427,18 @@ enum NodeFee {
     On { until: Instant, original: String },
 }
 
+/// The Ting account of a wallet string: Ting ID shares an address as `<64 hex>&net=<chain>` (sometimes with a `ting:` prefix);
+/// the pool and the gate want the 64 hex digits only (0.2.0 sent the tail and the pool closed the connection).
+pub fn clean_account(w: &str) -> String {
+    let s = w.trim();
+    let s = s.strip_prefix("ting:").unwrap_or(s);
+    let s = s.split(['&', '?', '/']).next().unwrap_or("").trim();
+    if s != w.trim() {
+        println!("note: wallet {:?} -> Ting account {s} (the part after '&' / '?' is not part of the account)", w.trim());
+    }
+    s.to_string()
+}
+
 pub fn mine(o: Opts) -> Result<()> {
     let solo = o.pools.is_empty();
     let nd = if solo { Some(node::resolve(o.node.as_deref(), o.node_dir.as_deref(), o.node_token_file.as_deref(), o.node_remote)?) } else { None };
@@ -504,6 +517,35 @@ pub fn mine(o: Opts) -> Result<()> {
         mem_off: match &o.moffset { Some(s) => clocks::expand_i32(s, devices.len(), "--moffset")?, None => vec![] },
         no_hive_mem: false,
     };
+    // 0.2.1: the memory clock locked at the lowest value that keeps the full core range (Ting's SHA-256 does not use the video
+    // memory: RTX 3070 at a 1800 lock 128.9 W -> 115.5 W at 810 MHz, the same 5.14 GH/s); not with --lock-mclock / --moffset /
+    // --no-mem-lock, and not on a GPU whose HiveOS OC profile locks the memory itself
+    if nvidia && clock_opts.mem_mhz.is_empty() && clock_opts.mem_off.is_empty() && !o.no_mem_lock {
+        if let Ok(nv) = crate::nvml::Nvml::load() {
+            let hive = crate::hiveoc::load();
+            clock_opts.mem_mhz = buses
+                .iter()
+                .map(|b| {
+                    let d = nv.by_bus(b).ok()?;
+                    if hive.as_ref().is_some_and(|h| nv.index(d).and_then(|i| h.mem_lock(i as usize)).is_some()) {
+                        return None;
+                    }
+                    match nv.low_mem_clock(d) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            println!("clocks: GPU bus {}: memory clock not lowered ({e:#})", crate::uv::short_bus(b));
+                            None
+                        }
+                    }
+                })
+                .collect();
+            if clock_opts.mem_mhz.iter().any(Option::is_some) {
+                println!("clocks: default memory lock {:?} MHz (the lowest that keeps the full core clock range: SHA-256 does not use the video memory; --no-mem-lock leaves it alone)", clock_opts.mem_mhz);
+            } else {
+                clock_opts.mem_mhz.clear();
+            }
+        }
+    }
     let mut o = o;
     if nvidia && crate::autolock::active() {
         let cards: Vec<crate::autolock::Card> = devices.iter().enumerate().map(|(p, &d)| crate::autolock::Card { dev: d, bus: buses[p].clone(), kernel: "ting-t1".into() }).collect();
@@ -1012,8 +1054,9 @@ GATE (serve several rigs from your nodes, each rig mapped to a node / payout acc
 GPU options:
   --devices 0,2         GPUs to use (default: all; numbered as nvidia-smi)
   --backend cuda|opencl default: CUDA when it sees a GPU, else OpenCL
-  --lock-cclock MHz     core clock lock, one value or one per GPU (RTX 3070: 1500 = best GH/J)
-  --lock-mclock MHz     memory clock lock;  --moffset MHz  memory offset
+  --lock-cclock MHz     core clock lock, one value or one per GPU (RTX 3070: 1500 = best GH/W)
+  --lock-mclock MHz     memory clock lock (default: the lowest that keeps the full core range, e.g. 810 on RTX 30: SHA-256
+                        does not use the video memory, about -10 % power);  --no-mem-lock  leave it alone;  --moffset MHz
   --auto-uv             tune the core V/F offset per GPU and lock (checked by a child process, profiles kept per lock)
   --uv-offset N         fixed core offset;  --uv-reset / --uv-reset-all  forget profiles
   --auto-lock           measure locks top-down and choose by efficiency (--auto-lock-range 1650,1500,1350)

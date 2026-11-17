@@ -29,7 +29,7 @@ else
     f=${_fan[$d]:-0}; [[ $f =~ ^[0-9]+$ ]] || f=0; _f+=("$f")
   done
   _eff=$(grep -oP 'total .*?\K[0-9.]+ GH/W' <<< "$_line" | head -n 1)
-  _ver=$CUSTOM_VERSION; [[ -n $_eff ]] && _ver="$CUSTOM_VERSION ${_eff/GH\/W/GH\/J}"
+  _ver=$CUSTOM_VERSION; [[ -n $_eff ]] && _ver="$CUSTOM_VERSION $_eff"
   khs=$(awk -v x="${_total:-0}" 'BEGIN{printf "%.0f", x*1e6}')
   stats=$(jq -nc \
     --argjson hs "$(printf '%s\n' "${_hs[@]}" | jq -sc .)" \
