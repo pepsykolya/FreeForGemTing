@@ -12,8 +12,10 @@ FFGT (FreeForGem Ting) mines **Daler (DLR)** on the **Ting** blockchain on NVIDI
 
 ### 1. You need
 
-- A Ting account (64 hex characters) to receive DLR: create it with the Ting ID Android app or with
-  `ting wallet create` of [ting-miner](https://github.com/ting-organization/ting-miner) (keep `wallet.json` and its
+- A Ting account (64 hex characters) to receive DLR: create it with the Ting ID Android app (it is not in Google Play: install
+  `Ting-ID.apk` from [ting-id releases](https://github.com/ting-organization/ting-id/releases)), with the web wallet
+  [wallet.ting-project.com](https://wallet.ting-project.com), or with `ting wallet create` of
+  [ting-miner](https://github.com/ting-organization/ting-miner) (keep `wallet.json` and its
   password safe — nobody can restore them).
 - HiveOS with an NVIDIA driver (any recent one) or an AMD driver with OpenCL.
 
@@ -26,7 +28,7 @@ account, **Pool** — "Configure in miner", **Miner** — "Custom", then *Setup 
 |---|---|
 | Miner name | `ffgt` (filled in automatically from the URL) |
 | Installation URL | `<link to ffgt-VERSION_hiveos.tar.gz>` |
-| Hash algorithm | `ting-sha256` |
+| Hash algorithm | leave empty (`----`): HiveOS has no Ting algorithm in its list, the miner reports it by itself |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `crypto-connection.net:4073` (GPUs) or `crypto-connection.net:4074` (farms, higher start difficulty) |
 | Pass | `x` |
@@ -62,6 +64,7 @@ maps this rig to (`ting miner payout <account>` on that node).
 | RTX 3070 | stock (≈2100 MHz) | 5.98 | ≈158 | 0.038 |
 | CMP 50HX | lock 1500 + `--auto-uv` (HiveOS, 5 cards) | 5.0 | 119–123 | 0.042 |
 | CMP 50HX | lock 1470 + `--auto-uv` | 4.9 | 102–109 | 0.046 |
+| CMP 50HX | lock 1800 + `--auto-uv` (max speed; offset limited by the voltage floor) | 6.0–6.15 | 171–195 | 0.033 |
 | RTX 4070 Laptop | stock | 5.0–5.2 | 90–100 | 0.052 |
 
 Pool mining (kernel t1p); solo through a node or ffgt-gate is about 4 % faster at the same clock (kernel t1). Hash rate
@@ -84,8 +87,10 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 
 ### 1. Что нужно
 
-- Аккаунт Ting (64 шестнадцатеричных символа), на который придут DLR: создаётся в Android-приложении Ting ID или командой
-  `ting wallet create` из [ting-miner](https://github.com/ting-organization/ting-miner). Файл `wallet.json` и пароль к нему
+- Аккаунт Ting (64 шестнадцатеричных символа), на который придут DLR: создаётся в Android-приложении Ting ID (в Google Play его нет:
+  `Ting-ID.apk` — на странице [релизов ting-id](https://github.com/ting-organization/ting-id/releases)), в веб-кошельке
+  [wallet.ting-project.com](https://wallet.ting-project.com) или командой `ting wallet create` из
+  [ting-miner](https://github.com/ting-organization/ting-miner). Файл `wallet.json` и пароль к нему
   храните надёжно — восстановить их нельзя.
 - HiveOS с драйвером NVIDIA (любой свежий) или AMD с OpenCL.
 
@@ -98,7 +103,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 |---|---|
 | Miner name | `ffgt` (подставится сам по ссылке) |
 | Installation URL | `<ссылка на ffgt-ВЕРСИЯ_hiveos.tar.gz>` |
-| Hash algorithm | `ting-sha256` |
+| Hash algorithm | оставить пустым (`----`): алгоритма Ting в списке HiveOS нет, майнер сообщает его сам |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `crypto-connection.net:4073` (видеокарты) или `crypto-connection.net:4074` (фермы, выше стартовая сложность) |
 | Pass | `x` |
@@ -134,6 +139,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 | RTX 3070 | сток (≈2100 МГц) | 5,98 | ≈158 | 0,038 |
 | CMP 50HX | лок 1500 + `--auto-uv` (HiveOS, 5 карт) | 5,0 | 119–123 | 0,042 |
 | CMP 50HX | лок 1470 + `--auto-uv` | 4,9 | 102–109 | 0,046 |
+| CMP 50HX | лок 1800 + `--auto-uv` (максимум скорости; оффсет упирается в минимум напряжения) | 6,0–6,15 | 171–195 | 0,033 |
 | RTX 4070 Laptop | сток | 5,0–5,2 | 90–100 | 0,052 |
 
 Майнинг в пул (ядро t1p); соло через ноду или ffgt-gate примерно на 4 % быстрее на той же частоте (ядро t1). Хешрейт растёт
