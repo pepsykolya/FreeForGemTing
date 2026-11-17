@@ -45,7 +45,7 @@ on a backup.
 
 | Card | Recommended |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (best GH/J), add `--auto-uv` for an automatic undervolt |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (best GH/W), add `--auto-uv` for an automatic undervolt |
 | any NVIDIA, max speed | nothing (stock clocks) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 is a bit more efficient) |
 | AMD | nothing (`--backend opencl` is chosen automatically when there is no NVIDIA GPU) |
@@ -61,7 +61,7 @@ maps this rig to (`ting miner payout <account>` on that node).
 
 ### 4. Expected hash rate (measured)
 
-| GPU | Settings | GH/s | W | GH/J |
+| GPU | Settings | GH/s | W | GH/W |
 |---|---|---:|---:|---:|
 | RTX 3070 | lock 1500 + `--auto-uv` (HiveOS, 4 cards) | 4.06–4.09 | 58–67 | 0.066 |
 | RTX 3070 | lock 1500, no undervolt | 4.06 | 99 | 0.041 |
@@ -79,7 +79,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 ### 5. Check
 
 - HiveOS shows the hash rate in GH/s (as kH/s × 10⁶ internally), accepted / rejected shares and the efficiency next to
-  the version (`0.2.0 0.0610 GH/J`).
+  the version (`0.2.0 0.0610 GH/W`).
 - Miner log: `miner log` or `/var/log/miner/ffgt/ffgt.log`; the line every 10 s:
   `[ 60s] GPU0 4.273 (70 W, 0.0610 GH/W) ... | total ... | user sub 9 acc 9 rej 0 ... | fee sub 0 acc 0 rej 0`.
 - Pool statistics: `https://crypto-connection.net` → Daler → your account. Minimum payout 100 DLR, after 30 confirmations.
@@ -124,7 +124,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 
 | Карта | Рекомендация |
 |---|---|
-| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (лучшие GH/J), плюс `--auto-uv` — автоматический андервольт |
+| RTX 3070 / 3060 Ti / 3080 | `--lock-cclock 1500` (лучшие GH/W), плюс `--auto-uv` — автоматический андервольт |
 | любая NVIDIA, максимум скорости | ничего (стоковые частоты) |
 | CMP 50HX / 90HX | `--lock-cclock 1500 --auto-uv` (1470 чуть экономичнее) |
 | AMD | ничего (`--backend opencl` выбирается сам, если NVIDIA нет) |
@@ -140,7 +140,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 
 ### 4. Ожидаемый хешрейт (замеры)
 
-| GPU | Настройки | GH/s | Вт | GH/J |
+| GPU | Настройки | GH/s | Вт | GH/W |
 |---|---|---:|---:|---:|
 | RTX 3070 | лок 1500 + `--auto-uv` (HiveOS, 4 карты) | 4,06–4,09 | 58–67 | 0,066 |
 | RTX 3070 | лок 1500, без андервольта | 4,06 | 99 | 0,041 |
@@ -158,7 +158,7 @@ Vulkan-библиотеки драйвера).
 
 ### 5. Проверка
 
-- HiveOS показывает хешрейт в GH/s, принятые/отклонённые шары и эффективность рядом с версией (`0.2.0 0.0610 GH/J`).
+- HiveOS показывает хешрейт в GH/s, принятые/отклонённые шары и эффективность рядом с версией (`0.2.0 0.0610 GH/W`).
 - Лог майнера: `miner log` или `/var/log/miner/ffgt/ffgt.log`; строка раз в 10 с:
   `[ 60s] GPU0 4.273 (70 W, 0.0610 GH/W) ... | total ... | user sub 9 acc 9 rej 0 ... | fee sub 0 acc 0 rej 0`.
 - Статистика пула: `https://crypto-connection.net` → Daler → ваш аккаунт. Минимальная выплата 100 DLR, после 30 подтверждений.
