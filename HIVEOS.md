@@ -15,8 +15,12 @@ FFGT (FreeForGem Ting) mines **Daler (DLR)** on the **Ting** blockchain on NVIDI
 - A Ting account (64 hex characters) to receive DLR: create it with the Ting ID Android app (it is not in Google Play: install
   `Ting-ID.apk` from [ting-id releases](https://github.com/ting-organization/ting-id/releases)), with the web wallet
   [wallet.ting-project.com](https://wallet.ting-project.com), or with `ting wallet create` of
-  [ting-miner](https://github.com/ting-organization/ting-miner) (keep `wallet.json` and its
-  password safe — nobody can restore them).
+  [ting-miner](https://github.com/ting-organization/ting-miner). In Ting ID / the web wallet use the **Spending** account
+  (Receive) and add the 12-word recovery phrase in Identity (it becomes active after 7 days). A `ting wallet create` account
+  is a `wallet.json` file with a password (no phrase; keep both safe — nobody can restore them); it cannot be imported into
+  Ting ID or the web wallet, its DLR are sent only with `ting wallet send` through a node. To use
+  [Ting Swap](https://ting-organization.github.io/ting-swap/) (DLR ↔ LTC atomic swap, early testing) you need Ting ID or
+  the web wallet.
 - HiveOS with an NVIDIA driver (any recent one) or an AMD driver with OpenCL.
 
 ### 2. Flight sheet
@@ -90,8 +94,12 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 - Аккаунт Ting (64 шестнадцатеричных символа), на который придут DLR: создаётся в Android-приложении Ting ID (в Google Play его нет:
   `Ting-ID.apk` — на странице [релизов ting-id](https://github.com/ting-organization/ting-id/releases)), в веб-кошельке
   [wallet.ting-project.com](https://wallet.ting-project.com) или командой `ting wallet create` из
-  [ting-miner](https://github.com/ting-organization/ting-miner). Файл `wallet.json` и пароль к нему
-  храните надёжно — восстановить их нельзя.
+  [ting-miner](https://github.com/ting-organization/ting-miner). В Ting ID и веб-кошельке берите счёт **Spending** (кнопка
+  Receive) и сразу добавьте фразу из 12 слов во вкладке Identity (она начинает действовать через 7 дней). Аккаунт от
+  `ting wallet create` — это файл `wallet.json` с паролем (фразы нет; храните оба надёжно — восстановить нельзя); в Ting ID и
+  веб-кошелёк он не импортируется, его DLR отправляются только командой `ting wallet send` через ноду. Для обмена в
+  [Ting Swap](https://ting-organization.github.io/ting-swap/) (атомарный своп DLR ↔ LTC, ранняя версия) нужен Ting ID или
+  веб-кошелёк.
 - HiveOS с драйвером NVIDIA (любой свежий) или AMD с OpenCL.
 
 ### 2. Полётный лист (Flight sheet)
