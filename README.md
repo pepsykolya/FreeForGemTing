@@ -27,7 +27,7 @@ NVIDIA (CUDA, GTX 10 / sm_61 and newer, incl. CMP) and AMD (OpenCL). Linux, Hive
 | Solo, own node | `./ffgt --node 127.0.0.1:18440 --node-dir <the node's data directory>` |
 | Rigs via gate | on the node's machine: `./ffgt --gate gate.json`; on the rigs: `--pool GATE:4173 --wallet any.<rig> --password <rig password>` |
 
-A Ting account is 64 hex characters: Ting ID app, or `ting wallet create` of
+A Ting account is 64 hex characters: Ting ID Android app (APK from https://github.com/ting-organization/ting-id/releases, not in Google Play), the web wallet https://wallet.ting-project.com, or `ting wallet create` of
 [ting-miner](https://github.com/ting-organization/ting-miner). Solo blocks pay the node's
 `ting miner payout <account>`.
 
@@ -101,7 +101,7 @@ HiveOS, Windows. Комиссия разработчика **1 %**.
 | Соло на своей ноде | `./ffgt --node 127.0.0.1:18440 --node-dir <папка данных ноды>` |
 | Риги через шлюз | на машине с нодой: `./ffgt --gate gate.json`; на ригах: `--pool ШЛЮЗ:4173 --wallet any.<риг> --password <пароль рига>` |
 
-Аккаунт Ting — 64 шестнадцатеричных символа: приложение Ting ID или `ting wallet create` из
+Аккаунт Ting — 64 шестнадцатеричных символа: Android-приложение Ting ID (APK с https://github.com/ting-organization/ting-id/releases, в Google Play его нет), веб-кошелёк https://wallet.ting-project.com или `ting wallet create` из
 [ting-miner](https://github.com/ting-organization/ting-miner). Соло-блоки платят на `ting miner payout <аккаунт>` ноды.
 
 Опции и пример `gate.json` — выше (английская часть); комиссия: 1 % — слот 60 с на каждые 100 мин майнинга на
