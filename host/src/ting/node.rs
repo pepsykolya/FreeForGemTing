@@ -259,6 +259,71 @@ pub struct Job {
     pub tpl: Arc<Template>,
     pub solved: Arc<AtomicBool>, // a block for this template went to the node: no second one (and the GPUs move on)
     pub tgen: u64, // tip generation: a solution for an older one is stale
+    /// 0.2.2 template grouping: older templates (pool: jobs) of the same tip that share the last SHA-256 block (header bytes
+    /// 244..277 + the nonce) and the targets, newest first; the GPUs search them together with this one (one message
+    /// schedule per nonce, see tinggpu.h).  Each member keeps its own id / solved flag.
+    pub group: Arc<Vec<Job>>,
+}
+
+impl Job {
+    pub fn new(src: Src, tpl: Template, tgen: u64) -> Job {
+        Job { src, tpl: Arc::new(tpl), solved: Arc::new(AtomicBool::new(false)), tgen, group: Arc::new(Vec::new()) }
+    }
+    /// This job without its group (a ring member).
+    pub fn alone(&self) -> Job {
+        Job { group: Arc::new(Vec::new()), ..self.clone() }
+    }
+}
+
+/// The first header byte of the last SHA-256 block (message byte 256 = 12-byte tag + 244).
+pub const SHARED_TAIL: usize = 244;
+
+/// Two templates can be searched as one group: the same last block (header bytes 244..277; the nonce is ours), the same
+/// network and share targets, the same pool extranonce1, the same height.
+pub fn compatible(a: &Template, b: &Template) -> bool {
+    a.header[SHARED_TAIL..pow::NONCE_OFFSET] == b.header[SHARED_TAIL..pow::NONCE_OFFSET] && a.target == b.target && a.share == b.share && a.en1 == b.en1 && a.height == b.height
+}
+
+/// The templates (pool: jobs) of the current tip kept for grouping, newest last.  The node keeps 8 templates per tip and
+/// evicts the oldest when a 9th is made: with the next request in flight only 7 are certainly alive, so at most 7 (`cap`).
+pub struct Ring {
+    jobs: std::collections::VecDeque<Job>,
+    pub cap: usize,
+}
+
+impl Ring {
+    pub fn new(cap: usize) -> Ring {
+        Ring { jobs: Default::default(), cap: cap.max(1) }
+    }
+    pub fn clear(&mut self) {
+        self.jobs.clear();
+    }
+    /// Adds a job (another generation, or a template that cannot join the group, restarts the ring); a template id already
+    /// in the ring is not added again (the node keeps it in its place).  Returns the job to publish: the newest with the
+    /// others (newest first) as its group; None = a duplicate of a kept template.
+    pub fn push(&mut self, j: Job) -> Option<Job> {
+        if let Some(last) = self.jobs.back() {
+            if last.tgen != j.tgen || !compatible(&last.tpl, &j.tpl) {
+                self.jobs.clear();
+            }
+        }
+        if self.jobs.iter().any(|o| o.tpl.id == j.tpl.id) {
+            return None;
+        }
+        self.jobs.push_back(j.alone());
+        while self.jobs.len() > self.cap {
+            self.jobs.pop_front();
+        }
+        let n = self.jobs.len();
+        let group: Vec<Job> = self.jobs.iter().rev().skip(1).filter(|o| !o.solved.load(Ordering::Relaxed)).cloned().collect();
+        let newest = self.jobs[n - 1].clone();
+        Some(Job { group: Arc::new(group), ..newest })
+    }
+}
+
+/// Whether template grouping is on (`--no-group` / FFGT_NO_GROUP=1 turn it off).
+pub fn grouping() -> bool {
+    super::grouping()
 }
 
 pub enum Event {
@@ -282,11 +347,21 @@ fn log(s: &str) {
 pub const POLL: Duration = Duration::from_millis(250);
 /// A fresh template on the same tip after this long (new transactions, a later timestamp)
 pub const REFRESH: Duration = Duration::from_secs(20);
+/// 0.2.2 with template grouping: a template per second (the node keeps 8 per tip; groups of up to 7)
+pub const REFRESH_GROUP: Duration = Duration::from_secs(1);
+
+pub fn refresh() -> Duration {
+    if grouping() { REFRESH_GROUP } else { REFRESH }
+}
+
+/// Templates kept for a group: 7 (one request may be in flight while the GPUs search the others)
+pub const GROUP_KEEP: usize = 7;
 
 pub struct Shared {
     pub tip_gen: Arc<AtomicU64>,
     pub blocks: Mutex<Vec<(u64, String)>>, // (height, block id) of the blocks this run got accepted
     pub kick: AtomicBool,                  // fetch a template now (our block was accepted, or a template was refused)
+    pub keep: std::sync::atomic::AtomicUsize, // templates kept for a group (lowered when an older one turned out evicted)
 }
 
 pub fn spawn(n: Node, tx: Sender<(Src, Event)>, rx: Receiver<Submit>, stats: Arc<Stats>, sh: Arc<Shared>, stop: Arc<AtomicBool>) {
@@ -303,6 +378,7 @@ fn work(n: &Node, tx: &Sender<(Src, Event)>, stats: &Stats, sh: &Shared, stop: &
     let mut had_err = false;
     let mut syncing_said = false;
     let mut force = false;
+    let mut ring = Ring::new(if grouping() { sh.keep.load(Ordering::Relaxed) } else { 1 });
     while !stop.load(Ordering::Relaxed) {
         let t0 = Instant::now();
         match tip(n) {
@@ -337,17 +413,26 @@ fn work(n: &Node, tx: &Sender<(Src, Event)>, stats: &Stats, sh: &Shared, stop: &
                 if sh.kick.swap(false, Ordering::SeqCst) {
                     force = true;
                 }
-                if changed || force || last_tpl.is_none_or(|l| l.elapsed() >= REFRESH) {
+                if changed || force || last_tpl.is_none_or(|l| l.elapsed() >= refresh()) {
                     match template(n) {
                         Ok(tpl) => {
                             if changed {
                                 sh.tip_gen.fetch_add(1, Ordering::SeqCst);
                                 cur_tip = t;
                             }
+                            if force {
+                                // our block accepted / a solution refused / the producer data switched (node fee slot): the
+                                // node's templates changed, start the group afresh
+                                ring.clear();
+                            }
                             force = false;
                             last_tpl = Some(Instant::now());
-                            let job = Job { src: Src::User, tpl: Arc::new(tpl), solved: Arc::new(AtomicBool::new(false)), tgen: sh.tip_gen.load(Ordering::SeqCst) };
-                            let _ = tx.send((Src::User, Event::Job(job)));
+                            if grouping() {
+                                ring.cap = sh.keep.load(Ordering::Relaxed).max(1);
+                            }
+                            if let Some(job) = ring.push(Job::new(Src::User, tpl, sh.tip_gen.load(Ordering::SeqCst))) {
+                                let _ = tx.send((Src::User, Event::Job(job)));
+                            }
                         }
                         Err(e) => {
                             log(&format!("template: {e:#}"));
@@ -390,7 +475,18 @@ fn sender(n: &Node, rx: &Receiver<Submit>, stats: &Stats, sh: &Shared, stop: &At
                 sh.kick.store(true, Ordering::SeqCst);
                 if msg.contains("unknown or expired template") {
                     stats.stale_rej.fetch_add(1, Ordering::Relaxed);
-                    log(&format!("solution stale: template {} (height {}) is gone (new tip): {msg}", &tpl.id[..16], tpl.height));
+                    let new_tip = s.job.tgen != sh.tip_gen.load(Ordering::SeqCst) || tip(n).is_ok_and(|x| x.1 >= tpl.height);
+                    if new_tip {
+                        log(&format!("solution stale: template {} (height {}) is gone (new tip): {msg}", &tpl.id[..tpl.id.len().min(16)], tpl.height));
+                    } else {
+                        // the tip stood but the template was evicted: another client takes templates from this node too (a
+                        // second miner / ffgt-gate on it) - keep fewer for the group
+                        let k = sh.keep.load(Ordering::Relaxed);
+                        if k > 2 {
+                            sh.keep.store(k - 2, Ordering::Relaxed);
+                        }
+                        log(&format!("solution LOST: template {} (height {}) was evicted by the node while the tip stood (does another miner or ffgt-gate take templates from this node?): groups keep {} templates from now", &tpl.id[..tpl.id.len().min(16)], tpl.height, sh.keep.load(Ordering::Relaxed)));
+                    }
                 } else {
                     log(&format!("solution REJECTED height {} GPU{}: {msg}", tpl.height, s.gpu));
                 }
@@ -405,6 +501,39 @@ mod tests {
     fn hmac_rfc4231_case2() {
         assert_eq!(super::pow::hex(&super::mac("Jefe", &[b"what do ya ", b"want for nothing?"])), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
+    fn tpl(id: &str, height: u64, tail: u8, front: u8) -> super::Template {
+        let mut header = [front; super::pow::HEADER_LEN];
+        header[super::SHARED_TAIL..].fill(tail);
+        super::Template { id: id.into(), job_id: id.into(), share: [0x0f; 32], diff: 0.0, en1: None, height, parent: String::new(), header, target: [0x0f; 32], txs: 0, got: std::time::Instant::now() }
+    }
+
+    #[test]
+    fn ring_groups_compatible_templates_of_one_tip() {
+        use super::{Job, Ring};
+        use crate::stratum::Src;
+        let mut r = Ring::new(3);
+        let j = r.push(Job::new(Src::User, tpl("a", 5, 1, 1), 1)).unwrap();
+        assert!(j.group.is_empty());
+        let j = r.push(Job::new(Src::User, tpl("b", 5, 1, 2), 1)).unwrap();
+        assert_eq!(j.group.iter().map(|x| x.tpl.id.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert!(r.push(Job::new(Src::User, tpl("b", 5, 1, 2), 1)).is_none(), "a template id already kept is not added again");
+        r.push(Job::new(Src::User, tpl("c", 5, 1, 3), 1));
+        let j = r.push(Job::new(Src::User, tpl("d", 5, 1, 4), 1)).unwrap();
+        assert_eq!(j.group.iter().map(|x| x.tpl.id.as_str()).collect::<Vec<_>>(), ["c", "b"], "newest first, at most cap in all");
+        // another last block (producer data switched): the group starts afresh
+        let j = r.push(Job::new(Src::User, tpl("e", 5, 2, 4), 1)).unwrap();
+        assert!(j.group.is_empty());
+        // another tip generation
+        r.push(Job::new(Src::User, tpl("f", 5, 2, 5), 1));
+        let j = r.push(Job::new(Src::User, tpl("g", 6, 2, 5), 2)).unwrap();
+        assert!(j.group.is_empty());
+        // a solved member is left out
+        let k = r.push(Job::new(Src::User, tpl("h", 6, 2, 6), 2)).unwrap();
+        k.group[0].solved.store(true, std::sync::atomic::Ordering::SeqCst);
+        let j = r.push(Job::new(Src::User, tpl("i", 6, 2, 7), 2)).unwrap();
+        assert_eq!(j.group.iter().map(|x| x.tpl.id.as_str()).collect::<Vec<_>>(), ["h"]);
+    }
+
     #[test]
     fn payout_from_producer() {
         let s = serde_json::json!({"producer_hex": "4f43503101000000200000001111111111111111111111111111111111111111111111111111111111111111"});

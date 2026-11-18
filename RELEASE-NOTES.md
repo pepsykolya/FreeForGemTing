@@ -1,5 +1,56 @@
 # FFGT — release notes
 
+# FFGT 0.2.2
+
+## English
+
+Template grouping: more hashes from the same GPU.
+
+- **Template grouping (solo, ffgt-gate, pool)**: a Ting header's last SHA-256 block (bytes 244..293: the end of the payout
+  data and the nonce) is the same in every template of one tip, only the first four blocks differ. FFGT now keeps up to
+  7 templates of the tip (a new one every second; the node keeps 8) and computes the message schedule of the last block
+  once per nonce for all of them. A block found on any of them goes to the node with that template's id. RTX 3070, lock
+  1800 / memory 810, offset 0, 2 min each: **solo 5.11 → 7.11 GH/s (×1.39) at 144 → 146 W, 0.0355 → 0.0486 GH/W**;
+  pool crypto-connection (jobs of one height grouped, 1–4 per height) **4.85 → 6.08 GH/s (×1.26)**, 0.0347 → 0.0420 GH/W.
+  The hash rate shown counts every template of the group (the log says `group N`).
+- **ffgt-gate** sends every template of the tip to the rigs as a job (clean = false), so rigs on 0.2.2 group them too;
+  rigs on older versions keep working (they mine the newest job). Shares found just before a difficulty increase are no
+  longer refused as "low difficulty"; `/summary` has a 15-minute hash rate per rig (`hashrate_ghs_15min`) beside the
+  lifetime one. A node served by a gate should have no other miner taking templates from it (the node keeps 8 per tip).
+- `--no-group` turns grouping off (one template at a time, as 0.2.1); `--hash-bench`, `--self-test` and `--auto-uv` checks
+  use the group kernel (auto-uv profiles are re-tuned once for it).
+- **CPU stays low**: the blocking sync of 0.2.1 is kept (GPU threads sleep while the GPU computes): under 1 % of a core
+  per GPU on the RTX 3070 above, with grouping on.
+- OpenCL (AMD): no group kernels yet, works as before.
+- CMP 50HX: the driver does not support a memory lock (the automatic memory lock of 0.2.1 is skipped there, nothing breaks).
+- HiveOS Installation URL: `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz`
+- Efficiency in **GH/W**.
+
+## Русский
+
+Группировка шаблонов: больше хешей с той же карты.
+
+- **Группировка шаблонов (соло, ffgt-gate, пул)**: последний блок SHA-256 заголовка Ting (байты 244..293: конец данных
+  выплаты и nonce) одинаков у всех шаблонов одной вершины, различаются только первые четыре блока. FFGT держит до 7
+  шаблонов вершины (новый раз в секунду; нода хранит 8) и считает расписание сообщения последнего блока один раз на
+  nonce для всех. Блок, найденный на любом из них, уходит в ноду с id именно этого шаблона. RTX 3070, лок 1800 / память
+  810, оффсет 0, по 2 мин: **соло 5,11 → 7,11 GH/s (×1,39) при 144 → 146 Вт, 0,0355 → 0,0486 GH/W**; пул crypto-connection
+  (задания одной высоты, 1–4 на высоту) **4,85 → 6,08 GH/s (×1,26)**, 0,0347 → 0,0420 GH/W. Показанный хешрейт учитывает
+  все шаблоны группы (в логе `group N`).
+- **ffgt-gate** рассылает ригам каждый шаблон вершины как задание (clean = false) — риги на 0.2.2 тоже группируют; риги
+  на старых версиях работают как раньше (майнят новейшее задание). Шары, найденные перед повышением сложности, больше не
+  отклоняются как «low difficulty»; в `/summary` у рига есть хешрейт за 15 минут (`hashrate_ghs_15min`) рядом с
+  оценкой за всё время. Ноду, которую обслуживает шлюз, не должен параллельно опрашивать другой майнер (нода хранит 8
+  шаблонов на вершину).
+- `--no-group` выключает группировку (по одному шаблону, как в 0.2.1); `--hash-bench`, `--self-test` и проверки
+  `--auto-uv` используют групповое ядро (профили auto-uv один раз подбираются заново).
+- **CPU по-прежнему почти не нагружен**: blocking sync из 0.2.1 сохранён (потоки GPU спят, пока считает видеокарта):
+  меньше 1 % ядра на карту на той же RTX 3070 с группировкой.
+- OpenCL (AMD): групповых ядер пока нет, работает как раньше.
+- CMP 50HX: драйвер не поддерживает лок памяти (автолок памяти из 0.2.1 там не срабатывает, работе не мешает).
+- Installation URL для HiveOS: `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz`
+- Эффективность — в **GH/W**.
+
 # FFGT 0.2.1
 
 ## English

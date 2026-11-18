@@ -41,8 +41,23 @@ fn lg(m: impl AsRef<str>) {
     println!("auto-uv: {}", m.as_ref());
 }
 
+/// 0.2.2: the group size the miner searches with (the check runs the same group kernel: its load / failure edge differ from
+/// the single-job kernel's); part of the profile's kernel id
+static TUNE_GROUP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
+pub fn set_tune_group(n: usize) {
+    TUNE_GROUP.store(n.clamp(1, 8), Ordering::Relaxed);
+}
+
+fn tune_group() -> usize {
+    TUNE_GROUP.load(Ordering::Relaxed)
+}
+
 fn kernel_id() -> String {
-    format!("ffgt{}/t1", env!("CARGO_PKG_VERSION"))
+    match tune_group() {
+        1 => format!("ffgt{}/t1", env!("CARGO_PKG_VERSION")),
+        g => format!("ffgt{}/t1g{g}", env!("CARGO_PKG_VERSION")),
+    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -94,14 +109,34 @@ pub fn check_child(dev: i32, secs: u32, refs: &str, backend: Option<gpu::Backend
         return fail(format!("{e:#}"));
     }
     let jobs = check_jobs();
-    let pj: Vec<gpu::TgJob> = jobs.iter().map(|(h, t, _)| gpu::job_build(h, t)).collect();
+    let gsz = gpu::group_size(dev, tune_group());
+    // per check job a group of gsz headers: the job's header with bytes before the shared tail varied (the same last block)
+    let heads: Vec<Vec<[u8; pow::HEADER_LEN]>> = jobs
+        .iter()
+        .map(|(h, _, _)| {
+            (0..gsz)
+                .map(|k| {
+                    let mut x = *h;
+                    x[3 + 2 * k] ^= 0x5a;
+                    x[100 + k] = x[100 + k].wrapping_add(k as u8);
+                    if k == 0 {
+                        x = *h;
+                    }
+                    x
+                })
+                .collect()
+        })
+        .collect();
+    let pj: Vec<Vec<gpu::TgJob>> = jobs.iter().zip(&heads).map(|((_, t, _), hs)| hs.iter().map(|h| gpu::job_build(h, t)).collect()).collect();
     let given = !refs.is_empty();
     let mut refv: Vec<String> = refs.split(',').map(String::from).collect();
     refv.resize(JOBS, String::new());
-    let mut buf = vec![0u32; 4096];
-    let mut out = Vec::new();
+    let mut buf = vec![0u32; 2 * 4096];
+    let mut out: Vec<(usize, u32)> = Vec::new();
     let mut rng = 0x9e37_79b9_7f4a_7c15u64 ^ uv::now();
-    let expv = CHECK_COUNT as f64 / (1u64 << CHECK_K) as f64;
+    // the same hashes per launch as 0.2.1 (~1000 candidates): fewer nonces for a bigger group
+    let ccount = (CHECK_COUNT / gsz as u32) & !0xff;
+    let expv = ccount as f64 * gsz as f64 / (1u64 << CHECK_K) as f64;
     let (mut launches, mut cpu) = (0u64, 0u64);
     println!("TING_LOAD");
     let t0 = Instant::now();
@@ -118,11 +153,15 @@ pub fn check_child(dev: i32, secs: u32, refs: &str, backend: Option<gpu::Backend
         n += 1;
         out.clear();
         // a fixed range per job: the same answer every launch
-        if let Err(e) = gpu::search(dev, &pj[j], &jobs[j].2, (j as u32) << 26, CHECK_COUNT, &mut buf, &mut out) {
+        if let Err(e) = gpu::search_group(dev, &pj[j], &jobs[j].2, 11, (j as u32) << 26, ccount, &mut buf, &mut out) {
             return fail(format!("GPU: {e:#}"));
         }
         launches += 1;
-        let (sum, xr) = out.iter().fold((0u64, 0u64), |(s, x), &v| (s.wrapping_add(v as u64), x ^ v as u64));
+        // order-free signature of the (job, g) set
+        let (sum, xr) = out.iter().fold((0u64, 0u64), |(s, x), &(k, v)| {
+            let m = (v as u64) | (k as u64) << 32;
+            (s.wrapping_add(m), x ^ m.rotate_left(k as u32 * 7))
+        });
         let sig = format!("{:x}:{sum:x}:{xr:x}", out.len());
         if refv[j].is_empty() {
             refv[j] = sig;
@@ -139,10 +178,13 @@ pub fn check_child(dev: i32, secs: u32, refs: &str, backend: Option<gpu::Backend
             rng ^= rng << 13;
             rng ^= rng >> 7;
             rng ^= rng << 17;
-            let v = if full { out[i] } else { out[(rng % out.len().max(1) as u64) as usize] };
-            let id = pow::block_id(&jobs[j].0, &pow::nonce_of(&jobs[j].2, v));
+            let (k, v) = if full { out[i] } else { out[(rng % out.len().max(1) as u64) as usize] };
+            let Some(hk) = heads[j].get(k) else {
+                return fail(format!("the kernel returned job index {k} of a group of {gsz} (job {j})"));
+            };
+            let id = pow::block_id(hk, &pow::nonce_of(&jobs[j].2, v));
             if u32::from_be_bytes(id[..4].try_into().unwrap()) > t0w {
-                return fail(format!("a candidate failed the CPU re-hash (job {j})"));
+                return fail(format!("a candidate failed the CPU re-hash (job {j}, group member {k})"));
             }
             cpu += 1;
         }
@@ -150,7 +192,7 @@ pub fn check_child(dev: i32, secs: u32, refs: &str, backend: Option<gpu::Backend
     let dt = t0.elapsed().as_secs_f64();
     println!(
         "TING_CHECK ok launches {launches} ghs {:.3} counts {} cpu {cpu}{}",
-        launches as f64 * CHECK_COUNT as f64 / dt / 1e9,
+        launches as f64 * ccount as f64 * gsz as f64 / dt / 1e9,
         refv.join(","),
         if given { "" } else { " (self-reference)" }
     );
@@ -363,6 +405,8 @@ impl Live {
         let mut args = vec!["--ting-uv-check".to_string(), "--devices".into(), c.r.dev.to_string(), "--uv-secs".into(), secs.to_string()];
         args.push("--backend".into());
         args.push(if gpu::backend() == gpu::Backend::OpenCl { "opencl" } else { "cuda" }.into());
+        args.push("--uv-group".into());
+        args.push(tune_group().to_string());
         if !refs.is_empty() {
             args.push("--uv-ref".into());
             args.push(refs.into());
@@ -742,6 +786,9 @@ fn c_pos(l: &Live, c: &Card) -> usize {
 /// Before mining: every GPU in parallel (one check child each); returns the state the miner keeps for `tick`.  `nv` from
 /// offset::begin (the owner's offsets recorded).
 pub fn prepare(nv: &'static Nvml, cards: Vec<CardRef>, o: &uv::Opts, dir: &std::path::Path, stop: &Arc<AtomicBool>) -> Arc<Live> {
+    if let Some(r) = cards.first() {
+        set_tune_group(super::group_max(r.dev));
+    }
     let db = Store::load(dir, profiles::TING, |m| lg(m), |_| 0);
     if o.reset_all && db.forget_all() {
         lg("--uv-reset-all: every Ting profile forgotten");

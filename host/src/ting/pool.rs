@@ -10,7 +10,7 @@
 //! enumerates bytes 6..9 (word 10 of the last SHA-256 block, kernel t1p).
 //! Several entries (`--pool a,b`): failover to the next when a pool is unusable, back to the first after `failback` minutes
 //! on a backup (checked by a fresh login).  Dead link: no line from the pool for 150 s while connected = reconnect.
-use super::node::{Event, Job, Submit, Template};
+use super::node::{Event, Job, Ring, Submit, Template};
 use super::pow;
 use crate::stratum::{Src, Stats};
 use serde_json::{Value, json};
@@ -224,6 +224,9 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
     let mut pending: HashMap<u64, (Instant, String)> = HashMap::new();
     let mut next_id = 10u64;
     let mut cur_job: Option<String> = None;
+    // 0.2.2: the jobs of this height that share the last block (same header bytes 244..277, targets, extranonce1) are
+    // searched as one group; a clean job / a new height / another share target starts it afresh
+    let mut ring = Ring::new(if super::grouping() { super::node::GROUP_KEEP } else { 1 });
     loop {
         if l.stop.load(Ordering::Relaxed) {
             return End::Stop;
@@ -329,8 +332,12 @@ fn session(l: &Login, entry: usize, tx: &Sender<(Src, Event)>, rx: &Receiver<Sub
                 if cur_job.as_deref() != Some(jid) {
                     cur_job = Some(jid.to_string());
                 }
-                let job = Job { tpl: Arc::new(tpl), solved: Arc::new(AtomicBool::new(false)), tgen: l.jgen.load(Ordering::SeqCst), src: l.src };
-                let _ = tx.send((l.src, Event::Job(job)));
+                if clean {
+                    ring.clear();
+                }
+                if let Some(job) = ring.push(Job::new(l.src, tpl, l.jgen.load(Ordering::SeqCst))) {
+                    let _ = tx.send((l.src, Event::Job(job)));
+                }
             }
             ("", Some(i)) if pending.contains_key(&i) => {
                 let (t, what) = pending.remove(&i).unwrap();

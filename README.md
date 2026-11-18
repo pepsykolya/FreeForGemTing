@@ -17,12 +17,17 @@ NVIDIA (CUDA, GTX 10 / sm_61 and newer, incl. CMP) and AMD (OpenCL). Linux, Hive
   per GPU and lock (`--auto-uv`, every step checked by a separate process), automatic lock choice (`--auto-lock`),
   automatic memory lock (the lowest memory clock that keeps the full core range: about -10 % power at the same hash rate),
   temperature limit, recovery after a GPU fault or a hung GPU call, per-GPU settings, local API.
+- **Template grouping (0.2.2)**: up to 7 templates of one tip (solo, ffgt-gate) or jobs of one height (pool) are searched
+  together with one message schedule per nonce. RTX 3070, lock 1800 / memory 810: solo 5.11 → 7.11 GH/s
+  (0.0355 → 0.0486 GH/W), pool 4.85 → 6.08 GH/s at about 145 W (0.0347 → 0.0420 GH/W). `--no-group` turns it off.
+  OpenCL (AMD) has no grouping yet.
+- On CMP 50HX the driver does not support a memory lock: the memory stays at its clock.
 
 ## Quick start
 
 | Where | How |
 |---|---|
-| HiveOS | see [HIVEOS-ffgt.md](HIVEOS-ffgt.md) |
+| HiveOS | see [HIVEOS-ffgt.md](HIVEOS-ffgt.md); Installation URL `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz` |
 | Windows | unpack the zip, edit `start.bat` (your Ting account), run it |
 | Linux | `./ffgt --pool crypto-connection.net:4073 --wallet <ACCOUNT>.<worker>` |
 | Solo, own node | `./ffgt --node 127.0.0.1:18440 --node-dir <the node's data directory>` |
@@ -41,6 +46,7 @@ A Ting account is 64 hex characters: Ting ID Android app (APK from https://githu
 --devices 0,2           GPUs (default all, nvidia-smi numbering);  --backend cuda|opencl
 --lock-cclock MHz       core lock (one value or one per GPU);  --lock-mclock MHz;  --moffset MHz
 --no-mem-lock           leave the memory clock alone (default on NVIDIA: the lowest memory clock that keeps the full core range)
+--no-group              no template grouping (default since 0.2.2: up to 7 templates of one tip / jobs of one height per search)
 --auto-uv               undervolt tuner (profiles per GPU and lock);  --uv-offset N;  --uv-reset / --uv-reset-all
 --auto-lock             choose the lock by measurement;  --auto-lock-range 1650,1500,1350
 --temp-limit C          slow a GPU down above C;  --temp-stop C
@@ -93,12 +99,17 @@ HiveOS, Windows. Комиссия разработчика **1 %**.
   (`--auto-uv`, каждый шаг проверяется отдельным процессом), автовыбор лока (`--auto-lock`), автоматический
   лок памяти (самая низкая частота памяти с полным диапазоном ядра: около −10 % мощности при том же хешрейте), лимит температуры,
   восстановление после сбоя GPU или зависшего вызова, настройки по картам, локальный API.
+- **Группировка шаблонов (0.2.2)**: до 7 шаблонов одной вершины (соло, ffgt-gate) или заданий одной высоты (пул) ищутся
+  вместе, расписание сообщения — один раз на nonce. RTX 3070, лок 1800 / память 810: соло 5,11 → 7,11 GH/s
+  (0,0355 → 0,0486 GH/W), пул 4,85 → 6,08 GH/s при ~145 Вт (0,0347 → 0,0420 GH/W). `--no-group` выключает.
+  OpenCL (AMD) пока без группировки.
+- На CMP 50HX драйвер не поддерживает лок памяти: память остаётся на своей частоте.
 
 ## Быстрый старт
 
 | Где | Как |
 |---|---|
-| HiveOS | см. [HIVEOS-ffgt.md](HIVEOS-ffgt.md) |
+| HiveOS | см. [HIVEOS-ffgt.md](HIVEOS-ffgt.md); Installation URL `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz` |
 | Windows | распаковать zip, вписать свой аккаунт Ting в `start.bat`, запустить |
 | Linux | `./ffgt --pool crypto-connection.net:4073 --wallet <АККАУНТ>.<воркер>` |
 | Соло на своей ноде | `./ffgt --node 127.0.0.1:18440 --node-dir <папка данных ноды>` |

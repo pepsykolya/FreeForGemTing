@@ -1,7 +1,7 @@
 # FreeForGemPear — see LICENSE
 [package]
 name = "ffgt"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2024"
 license-file = "../LICENSE"
 description = "FFGT (FreeForGem Ting): Ting / Daler (DLR) GPU miner on the FreeForGem code base"

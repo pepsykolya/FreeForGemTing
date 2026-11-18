@@ -26,6 +26,23 @@ use std::time::{Duration, Instant};
 
 pub const ALGO_NAME: &str = "ting-sha256";
 
+static GROUPING: AtomicBool = AtomicBool::new(true);
+
+/// `--no-group`: no template grouping (one template / job per search, as 0.2.1; for comparisons)
+pub fn set_grouping(on: bool) {
+    GROUPING.store(on, Ordering::Relaxed);
+}
+
+/// Template grouping on (default) unless --no-group or FFGT_NO_GROUP=1.
+pub fn grouping() -> bool {
+    GROUPING.load(Ordering::Relaxed) && std::env::var("FFGT_NO_GROUP").map_or(true, |v| v.is_empty() || v == "0")
+}
+
+/// The largest group the worker of `dev` searches (1 without grouping or with a library that has no group kernels).
+pub fn group_max(dev: i32) -> usize {
+    if grouping() { gpu::group_size(dev, node::GROUP_KEEP) } else { 1 }
+}
+
 pub struct Opts {
     pub node: Option<String>,
     pub node_dir: Option<String>,
@@ -162,6 +179,45 @@ fn gpu_self_test(d: i32) -> Result<()> {
         total += got.len();
     }
     println!("[ok] GPU{d} {}: 12 headers x 2^20 nonces (kernels t1 and t1p): candidate set = CPU exactly ({total} candidates) ({:?})", gpu::device_name(d), t.elapsed());
+    // 0.2.2: groups (templates sharing the last block): every member's candidates = the CPU's, words 11 and 10
+    let gsz = gpu::group_size(d, 8);
+    if gsz > 1 {
+        let t = Instant::now();
+        let mut pairs = vec![0u32; 2 * 4096];
+        let mut gtotal = 0usize;
+        for (s, word) in [(40u32, 11), (41, 10)] {
+            let h0 = test_header(s);
+            let mut t9 = [0xffu8; 32];
+            t9[..4].copy_from_slice(&0x007f_ffffu32.to_be_bytes());
+            let hs: Vec<[u8; pow::HEADER_LEN]> = (0..gsz)
+                .map(|k| {
+                    let mut x = h0;
+                    if k > 0 {
+                        x[(k * 29) % node::SHARED_TAIL] ^= 0xa5;
+                    }
+                    x
+                })
+                .collect();
+            let jobs: Vec<gpu::TgJob> = hs.iter().map(|h| gpu::job_build(h, &t9)).collect();
+            let base = [s as u8; 16];
+            let count = 1u32 << 17;
+            let g0 = 0u32.wrapping_sub(count);
+            let mut got = Vec::new();
+            gpu::search_group(d, &jobs, &base, word, g0, count, &mut pairs, &mut got)?;
+            for (k, h) in hs.iter().enumerate() {
+                let mut mine: Vec<u32> = got.iter().filter(|x| x.0 == k).map(|x| x.1).collect();
+                mine.sort_unstable();
+                let want: Vec<u32> = (0..count)
+                    .map(|i| g0.wrapping_add(i))
+                    .filter(|&g| u32::from_be_bytes(pow::block_id(h, &pow::nonce_of_w(&base, word, g))[..4].try_into().unwrap()) <= 0x007f_ffff)
+                    .collect();
+                ensure!(mine == want, "group of {gsz} (word {word}) member {k}: GPU found {} candidates, the CPU {} (sets differ)", mine.len(), want.len());
+                gtotal += mine.len();
+            }
+            ensure!(got.iter().all(|x| x.0 < gsz), "group of {gsz}: a job index out of range");
+        }
+        println!("[ok] GPU{d}: template groups of {gsz} (words 11 and 10, 2^17 nonces): every member = CPU exactly ({gtotal} candidates) ({:?})", t.elapsed());
+    }
     Ok(())
 }
 
@@ -179,24 +235,35 @@ pub fn hash_bench(devices: &Option<Vec<i32>>, backend: Option<gpu::Backend>, sec
                     let h = test_header(7);
                     let mut t = [0u8; 32];
                     t[31] = 1;
-                    let job = gpu::job_build(&h, &t);
+                    // 0.2.2: a group of group_max(d) jobs sharing the last block, as mining (--no-group: one)
+                    let gsz = group_max(d);
+                    let jobs: Vec<gpu::TgJob> = (0..gsz)
+                        .map(|k| {
+                            let mut x = h;
+                            x[10 + k] ^= 0x33;
+                            if k == 0 {
+                                x = h;
+                            }
+                            gpu::job_build(&x, &t)
+                        })
+                        .collect();
                     let nvh = nv.and_then(|n| gpu::device_pci_bus_id(d).ok().and_then(|b| n.by_bus(&b).ok()));
-                    let mut buf = vec![0u32; 64];
+                    let mut buf = vec![0u32; 128];
                     let mut out = Vec::new();
-                    let count = 1u32 << 30;
+                    let count = ((1u32 << 30) / gsz as u32) & !0xffff;
                     // FFGT_BENCH_WORD=10: the pool kernel (t1p) instead of t1
                     let word: i32 = std::env::var("FFGT_BENCH_WORD").ok().and_then(|v| v.parse().ok()).unwrap_or(11);
                     let mut base = [0x5au8; 16];
                     let tw = Instant::now();
                     while tw.elapsed().as_secs_f64() < 1.0 {
-                        gpu::search_w(d, &job, &base, word, 0, count, &mut buf, &mut out)?;
+                        gpu::search_group(d, &jobs, &base, word, 0, count, &mut buf, &mut out)?;
                         base[0] = base[0].wrapping_add(1);
                     }
                     let (t0, mut ts, mut total, mut pw, mut pn, mut clk, mut cn) = (Instant::now(), Instant::now(), 0u64, 0.0, 0, 0u64, 0u64);
                     while t0.elapsed().as_secs_f64() < secs {
-                        gpu::search_w(d, &job, &base, word, 0, count, &mut buf, &mut out)?;
+                        gpu::search_group(d, &jobs, &base, word, 0, count, &mut buf, &mut out)?;
                         base[0] = base[0].wrapping_add(1);
-                        total += count as u64;
+                        total += count as u64 * gsz as u64;
                         if ts.elapsed() >= Duration::from_secs(1) {
                             ts = Instant::now();
                             if let (Some(n), Some(h)) = (nv, nvh) {
@@ -223,7 +290,7 @@ pub fn hash_bench(devices: &Option<Vec<i32>>, backend: Option<gpu::Backend>, sec
         tot += hs;
         let pw = w.map_or(String::new(), |w| format!("  {w:.0} W  {:.4} GH/W", hs / 1e9 / w));
         let c = clk.map_or(String::new(), |c| format!("  {c} MHz"));
-        println!("hash-bench GPU{d} {} ({:?} kernel {}): {:.3} GH/s{pw}{c}", gpu::device_name(d), gpu::backend(), gpu::kernel_name(d), hs / 1e9);
+        println!("hash-bench GPU{d} {} ({:?} kernel {}, group {}): {:.3} GH/s{pw}{c}", gpu::device_name(d), gpu::backend(), gpu::kernel_name(d), group_max(d), hs / 1e9);
     }
     println!("hash-bench total {:.3} GH/s", tot / 1e9);
     Ok(())
@@ -246,6 +313,7 @@ pub struct GpuStat {
     pub pause: Arc<AtomicBool>,
     pub paused: Arc<AtomicBool>,
     pub last_call: AtomicU64, // unix ms of the last finished library call (stall watch)
+    pub group: AtomicU64,     // templates in the last search (0.2.2 grouping; hashes = nonces x group)
 }
 
 struct Shared {
@@ -283,11 +351,14 @@ fn word_of(j: &Job) -> i32 {
 }
 
 fn worker_loop(dev: i32, pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
-    let mut buf = vec![0u32; 4096];
-    let mut out: Vec<u32> = Vec::new();
+    let mut buf = vec![0u32; 2 * 4096];
+    let mut out: Vec<(usize, u32)> = Vec::new();
     let mut count: u32 = COUNT_MIN;
     let mut cur: Option<Job> = None;
-    let mut job = gpu::TgJob::default();
+    let gmax = group_max(dev);
+    // the group searched: the newest job first, then its older compatible ones (node.rs Ring), their library jobs
+    let mut members: Vec<Job> = Vec::new();
+    let mut tjobs: Vec<gpu::TgJob> = Vec::new();
     let mut base = [0u8; 16];
     let mut word = 11;
     let mut g: u64 = 0;
@@ -325,7 +396,26 @@ fn worker_loop(dev: i32, pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
             cur = newest;
             if let Some(j) = &cur {
                 // the kernel compares the first word of the share target (solo: the block target)
-                job = gpu::job_build(&j.tpl.header, &j.tpl.share);
+                let job = gpu::job_build(&j.tpl.header, &j.tpl.share);
+                members.clear();
+                tjobs.clear();
+                members.push(j.alone());
+                tjobs.push(job);
+                for m in j.group.iter() {
+                    if members.len() >= gmax {
+                        break;
+                    }
+                    let t = gpu::job_build(&m.tpl.header, &m.tpl.share);
+                    // the library refuses a group whose last block / target differ: checked here as well
+                    if t.tail == job.tail && t.target == job.target && !m.solved.load(Ordering::Relaxed) {
+                        members.push(m.alone());
+                        tjobs.push(t);
+                    }
+                }
+                let n = gpu::group_size(dev, members.len());
+                members.truncate(n);
+                tjobs.truncate(n);
+                gs.group.store(n as u64, Ordering::Relaxed);
                 word = word_of(j);
                 base = rand::random();
                 match j.tpl.en1 {
@@ -338,8 +428,9 @@ fn worker_loop(dev: i32, pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
                     None => base[14] = pos as u8,
                 }
                 g = 0;
-                let p = (job.target[0] as f64 + 1.0) / 4294967296.0;
-                max_count = ((buf.len() as f64 / 4.0) / p).clamp(256.0, u32::MAX as f64) as u32;
+                // candidates per call: the group's jobs all count (the buffer holds 4096 pairs)
+                let p = (job.target[0] as f64 + 1.0) / 4294967296.0 * tjobs.len() as f64;
+                max_count = ((buf.len() as f64 / 2.0 / 4.0) / p).clamp(256.0, u32::MAX as f64) as u32;
             }
         }
         let Some(j) = cur.clone().filter(|j| !j.solved.load(Ordering::Relaxed)) else {
@@ -373,12 +464,19 @@ fn worker_loop(dev: i32, pos: usize, sh: &Shared, gs: &GpuStat) -> Result<()> {
             }
         }
         let t = Instant::now();
-        gpu::search_w(dev, &job, &base, word, g as u32, n, &mut buf, &mut out)?;
+        gpu::search_group(dev, &tjobs, &base, word, g as u32, n, &mut buf, &mut out)?;
         let dt = t.elapsed().as_secs_f64();
         g += n as u64;
-        gs.nonces.fetch_add(n as u64, Ordering::Relaxed);
-        for &c in &out {
-            check_hit(sh, gs, &j, &base, word, c);
+        // hashes: every job of the group is tried at each nonce
+        gs.nonces.fetch_add(n as u64 * tjobs.len() as u64, Ordering::Relaxed);
+        for &(k, c) in &out {
+            match members.get(k) {
+                Some(m) => check_hit(sh, gs, m, &base, word, c),
+                None => {
+                    gs.bad.fetch_add(1, Ordering::Relaxed);
+                    eprintln!("GPU{dev}: the library returned job index {k} of a group of {}: ignored", members.len());
+                }
+            }
         }
         if dt > 0.0 && n == count.min(max_count) {
             let c = (count as f64 * (CALL_SECS / dt)).clamp(count as f64 * 0.5, count as f64 * 2.0);
@@ -623,7 +721,7 @@ pub fn mine(o: Opts) -> Result<()> {
     let (ev_tx, ev_rx) = mpsc::channel::<(Src, Event)>();
     let (user_tx, user_rx) = mpsc::channel::<Submit>();
     let (fee_tx, fee_rx) = mpsc::channel::<Submit>();
-    let nsh = Arc::new(node::Shared { tip_gen: Arc::new(AtomicU64::new(0)), blocks: Mutex::new(Vec::new()), kick: AtomicBool::new(false) });
+    let nsh = Arc::new(node::Shared { tip_gen: Arc::new(AtomicU64::new(0)), blocks: Mutex::new(Vec::new()), kick: AtomicBool::new(false), keep: std::sync::atomic::AtomicUsize::new(node::GROUP_KEEP) });
     let user_gen: Arc<AtomicU64> = if solo { nsh.tip_gen.clone() } else { Arc::new(AtomicU64::new(0)) };
     let user_entry = Arc::new(AtomicU64::new(0));
     if let Some(nd) = &nd {
@@ -703,6 +801,7 @@ pub fn mine(o: Opts) -> Result<()> {
             pause: flags[pos].1.clone(),
             paused: flags[pos].2.clone(),
             last_call: AtomicU64::new(now_ms()),
+            group: AtomicU64::new(0),
         });
         if let Some(c) = watch.as_ref().and_then(|w| w.by_dev(dev).map(|k| &w.cards[k])) {
             if let (Some(left), Some(r)) = (crate::faults::excluded(&dir, &c.uuid), crate::faults::get(&dir, &c.uuid)) {
@@ -715,14 +814,22 @@ pub fn mine(o: Opts) -> Result<()> {
         }
         let (sh2, gs2) = (sh.clone(), gs.clone());
         handles.push(std::thread::Builder::new().name(format!("ting-gpu{dev}")).spawn(move || worker(dev, pos, sh2, gs2))?);
+        let gm = group_max(dev);
         println!(
-            "GPU {dev}: {} (bus {}, {}, {} {}), kernel {}",
+            "GPU {dev}: {} (bus {}, {}, {} {}), kernel {}, {}",
             gs.name,
             crate::uv::short_bus(&gs.bus),
             if nvidia { format!("sm_{}", gpu::compute_capability(dev)) } else { "OpenCL".into() },
             gpu::sm_count(dev),
             if nvidia { "SMs" } else { "CUs" },
-            if solo { "t1" } else { "t1p" }
+            if solo { "t1" } else { "t1p" },
+            if gm > 1 {
+                format!("group up to {gm} (templates of one tip searched together)")
+            } else if !grouping() {
+                "group 1 (--no-group)".to_string()
+            } else {
+                "group 1 (this library has no group kernels)".to_string()
+            }
         );
         gstats.push(gs);
     }
@@ -913,7 +1020,7 @@ pub fn mine(o: Opts) -> Result<()> {
                     }
                 };
                 per.push(api::GpuLine { dev: g.dev, name: g.name.clone(), bus: g.bus.clone(), ghs, w, alive: g.alive.load(Ordering::Relaxed), bad: g.bad.load(Ordering::Relaxed) });
-                parts.push(format!("GPU{} {:.3}{}{}{}{}", g.dev, ghs, pw, if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, crate::status::tag(g.dev), crate::templimit::tag(g.dev)));
+                parts.push(format!("GPU{} {:.3}{} group {}{}{}{}", g.dev, ghs, pw, g.group.load(Ordering::Relaxed), if g.alive.load(Ordering::Relaxed) { "" } else { " DEAD" }, crate::status::tag(g.dev), crate::templimit::tag(g.dev)));
             }
             let pp = if all_w && tot_w > 0.0 { format!(", {:.0} W, {:.4} GH/W", tot_w, tot / tot_w) } else { String::new() };
             let bad: u64 = gstats.iter().map(|g| g.bad.load(Ordering::Relaxed)).sum();
@@ -1061,6 +1168,8 @@ GPU options:
   --uv-offset N         fixed core offset;  --uv-reset / --uv-reset-all  forget profiles
   --auto-lock           measure locks top-down and choose by efficiency (--auto-lock-range 1650,1500,1350)
   --temp-limit C        slow a GPU down above C; --temp-stop C  pause it
+  --no-group            no template grouping (0.2.2 default: up to 7 templates of one tip / jobs of one height searched
+                        together, about +40 % solo on RTX 30; --no-group = one at a time, as 0.2.1)
   Flags win over the HiveOS OC profile; every clock / offset is put back on exit and after a crash.
 Other:
   --minutes M  stop after M minutes;  --self-test  check the kernels against the CPU;  --hash-bench S  speed test

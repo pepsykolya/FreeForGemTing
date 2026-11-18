@@ -1419,6 +1419,7 @@ fn real_main() -> Result<()> {
         let dev = get("--devices").and_then(|s| s.split(',').next().and_then(|x| x.trim().parse().ok())).unwrap_or(0);
         let secs = get("--uv-secs").and_then(|s| s.parse().ok()).unwrap_or(15);
         let backend = ting::parse_backend(get("--backend").as_deref()).ok().flatten();
+        ting::tune::set_tune_group(get("--uv-group").and_then(|s| s.parse().ok()).unwrap_or(1));
         crate::conout::exit(ting::tune::check_child(dev, secs, &get("--uv-ref").unwrap_or_default(), backend));
     }
     if std::env::args().any(|x| x == "--prox-uv-check") {
@@ -1542,6 +1543,7 @@ fn real_main() -> Result<()> {
             "--api-bind" => a.api = Some(val()?),
             "--blocks" => a.blocks = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--blocks needs a number"))?),
             "--no-mem-lock" => a.no_mem_lock = true,
+            "--no-group" => ting::set_grouping(false),
             "--token" => a.token = val()?,
             "--seeker-name" => a.seeker_name = val()?,
             "--hash-bench" => a.hash_bench = Some(val()?.parse().map_err(|_| anyhow::anyhow!("--hash-bench needs a number of seconds"))?),

@@ -37,6 +37,7 @@ macro_rules! tg_api {
         struct Api {
             _lib: dl::Lib,
             backend: Backend,
+            group: Option<Group>,
             $($f: unsafe extern "C" fn($($at),*) -> $r,)*
         }
         impl Api {
@@ -46,6 +47,7 @@ macro_rules! tg_api {
                         let p = lib.sym(stringify!($f)).ok_or_else(|| format!("{} has no {}", lib_file(backend), stringify!($f)))?;
                         unsafe { std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "C" fn($($at),*) -> $r>(p) }
                     },)*
+                    group: Group::load(&lib),
                     _lib: lib,
                     backend,
                 })
@@ -69,6 +71,22 @@ tg_api! {
     tg_bench: fn(dev: i32, secs: f64) -> f64;
     tg_kernel_name: fn(dev: i32) -> *const c_char;
     tg_search_w: fn(dev: i32, job: *const TgJob, base: *const u8, word: i32, g_start: u32, count: u32, out: *mut u32, max: u32) -> i32;
+}
+
+type SearchGroupFn = unsafe extern "C" fn(dev: i32, jobs: *const TgJob, n: i32, base: *const u8, word: i32, g_start: u32, count: u32, out: *mut u32, max: u32) -> i32;
+type GroupOkFn = unsafe extern "C" fn(dev: i32, n: i32) -> i32;
+
+/// API 3 (0.2.2): template grouping (tg_search_group); absent in an older library = groups of 1.
+struct Group {
+    ok: GroupOkFn,
+    search: SearchGroupFn,
+}
+impl Group {
+    fn load(lib: &dl::Lib) -> Option<Group> {
+        let ok = lib.sym("tg_group_ok")?;
+        let search = lib.sym("tg_search_group")?;
+        Some(unsafe { Group { ok: std::mem::transmute::<*mut std::ffi::c_void, GroupOkFn>(ok), search: std::mem::transmute::<*mut std::ffi::c_void, SearchGroupFn>(search) } })
+    }
 }
 
 static API: std::sync::OnceLock<Api> = std::sync::OnceLock::new();
@@ -212,4 +230,38 @@ pub fn bench(dev: i32, secs: f64) -> Result<f64> {
         bail!("GPU{dev}: bench failed: {}", last_error());
     }
     Ok(r)
+}
+
+/// The largest group of jobs (one shared last block / target) the library searches at once on `dev`, at most `want`
+/// (1 = no grouping: an OpenCL or pre-0.2.2 library).
+pub fn group_size(dev: i32, want: usize) -> usize {
+    let Some(g) = api().group.as_ref() else { return 1 };
+    (1..=want.min(8)).rev().find(|&n| unsafe { (g.ok)(dev, n as i32) } == 1).unwrap_or(1)
+}
+
+/// Group search: g in `word` for every job of `jobs` (they share tail and target; at most 8, a size group_size allows).
+/// Candidates as (job index, g) appended to `out`.  `buf` holds 2 words per candidate.  One job = search_w.
+#[allow(clippy::too_many_arguments)]
+pub fn search_group(dev: i32, jobs: &[TgJob], base: &[u8; 16], word: i32, g_start: u32, count: u32, buf: &mut [u32], out: &mut Vec<(usize, u32)>) -> Result<()> {
+    if jobs.len() == 1 || api().group.is_none() {
+        let mut v = Vec::new();
+        for (i, j) in jobs.iter().enumerate() {
+            v.clear();
+            search_w(dev, j, base, word, g_start, count, buf, &mut v)?;
+            out.extend(v.iter().map(|&g| (i, g)));
+        }
+        return Ok(());
+    }
+    let g = api().group.as_ref().unwrap();
+    let max = (buf.len() / 2) as u32;
+    let r = unsafe { (g.search)(dev, jobs.as_ptr(), jobs.len() as i32, base.as_ptr(), word, g_start, count, buf.as_mut_ptr(), max) };
+    if r < 0 {
+        bail!("GPU{dev}: Ting group search ({} jobs) failed: {} (driver fault / Xid?)", jobs.len(), last_error());
+    }
+    let n = r as usize;
+    if n > max as usize {
+        bail!("GPU{dev}: Ting result buffer full ({n} candidates in one call: target too easy for this call size)");
+    }
+    out.extend((0..n).map(|k| (buf[2 * k + 1] as usize, buf[2 * k])));
+    Ok(())
 }

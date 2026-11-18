@@ -31,7 +31,7 @@ account, **Pool** — "Configure in miner", **Miner** — "Custom", then *Setup 
 | Field | Value |
 |---|---|
 | Miner name | `ffgt` (filled in automatically from the URL) |
-| Installation URL | `<link to ffgt-VERSION_hiveos.tar.gz>` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz` |
 | Hash algorithm | leave empty (`----`): HiveOS has no Ting algorithm in its list, the miner reports it by itself |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `crypto-connection.net:4073` (GPUs) or `crypto-connection.net:4074` (farms, higher start difficulty) |
@@ -55,6 +55,14 @@ on a backup.
 core clock range (810 MHz on an RTX 3070). SHA-256 does not use the video memory, so the hash rate stays the same and the
 card draws less: RTX 3070 at a 1800 lock + `--auto-uv` 129 → 115.5 W at the same 5.14 GH/s. It is skipped when you set
 `--lock-mclock` / `--moffset` yourself or the HiveOS OC profile locks the memory; `--no-mem-lock` leaves the memory alone.
+On CMP 50HX the driver does not support a memory lock ("Setting locked Memory clocks is not supported"): the memory stays
+at its clock, the miner just goes on.
+
+**Template grouping (0.2.2, on by default)**: solo, through ffgt-gate and on the pool the miner searches up to 7 templates
+of one tip (jobs of one height on a pool) at once, with one message schedule per nonce. RTX 3070, lock 1800 / memory 810:
+solo 5.11 → 7.11 GH/s (0.0355 → 0.0486 GH/W), pool 4.85 → 6.08 GH/s at about 145 W (0.0347 → 0.0420 GH/W). `--no-group`
+turns it off (as 0.2.1). OpenCL (AMD) has no grouping yet. Rigs behind ffgt-gate group only when the gate and the rig both
+run 0.2.2.
 
 Flags set here win over the HiveOS OC profile (a locked clock in the miner is re-applied if HiveOS changes it), and every
 clock / offset is put back when the miner stops.
@@ -76,8 +84,10 @@ maps this rig to (`ting miner payout <account>` on that node).
 | CMP 50HX | lock 1470 + `--auto-uv` | 4.9 | 102–109 | 0.046 |
 | CMP 50HX | lock 1800 + `--auto-uv` (max speed; offset limited by the voltage floor) | 6.0–6.15 | 171–195 | 0.033 |
 | RTX 4070 Laptop | stock | 5.0–5.2 | 90–100 | 0.052 |
+| RTX 3070 | 0.2.2 grouping, lock 1800 / mem 810, solo | 7.11 | 146 | 0.0486 |
+| RTX 3070 | 0.2.2 grouping, lock 1800 / mem 810, pool | 6.08 | 145 | 0.0420 |
 
-Pool mining (kernel t1p); solo through a node or ffgt-gate is about 4 % faster at the same clock (kernel t1). Hash rate
+Rows without 0.2.2: one template at a time (0.2.1 / `--no-group`). Pool mining (kernel t1p); solo through a node or ffgt-gate is about 4 % faster at the same clock (kernel t1). Hash rate
 grows linearly with the core clock; the undervolt (`--auto-uv`) saves 30–40 % of the power at the same hash rate.
 For comparison, the official ting-miner (wgpu) does 2.04 GH/s on an RTX 4070 Laptop where FFGT does 5.0, and its GPU
 search does not run on HiveOS at all (no Vulkan driver library there).
@@ -116,7 +126,7 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 | Поле | Значение |
 |---|---|
 | Miner name | `ffgt` (подставится сам по ссылке) |
-| Installation URL | `<ссылка на ffgt-ВЕРСИЯ_hiveos.tar.gz>` |
+| Installation URL | `https://github.com/pepsykolya/FreeForGemTing/releases/download/v0.2.2/ffgt-0.2.2_hiveos.tar.gz` |
 | Hash algorithm | оставить пустым (`----`): алгоритма Ting в списке HiveOS нет, майнер сообщает его сам |
 | Wallet and worker template | `%WAL%.%WORKER_NAME%` |
 | Pool URL | `crypto-connection.net:4073` (видеокарты) или `crypto-connection.net:4074` (фермы, выше стартовая сложность) |
@@ -140,6 +150,14 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 сохраняет полный диапазон частот ядра (на RTX 3070 — 810 МГц). SHA-256 видеопамять не использует, поэтому хешрейт тот же,
 а мощность ниже: RTX 3070 на локе 1800 + `--auto-uv` 129 → 115,5 Вт при тех же 5,14 GH/s. Не ставится, если вы сами
 задали `--lock-mclock` / `--moffset` или память лочит OC-профиль HiveOS; `--no-mem-lock` — память не трогать.
+На CMP 50HX драйвер лок памяти не поддерживает («Setting locked Memory clocks is not supported»): память остаётся на своей
+частоте, майнер просто работает дальше.
+
+**Группировка шаблонов (0.2.2, включена по умолчанию)**: в соло, через ffgt-gate и в пуле майнер ищет сразу по 7
+шаблонам одной вершины (в пуле — по заданиям одной высоты), расписание сообщения считается один раз на nonce. RTX 3070,
+лок 1800 / память 810: соло 5,11 → 7,11 GH/s (0,0355 → 0,0486 GH/W), пул 4,85 → 6,08 GH/s при ~145 Вт (0,0347 → 0,0420
+GH/W). `--no-group` выключает (как 0.2.1). OpenCL (AMD) пока без группировки. Риги за ffgt-gate группируют, только когда
+и шлюз, и риг на 0.2.2.
 
 Флаги майнера главнее OC-профиля HiveOS (лок частоты возвращается, если HiveOS его поменял); все частоты и оффсеты
 возвращаются как были при остановке майнера.
@@ -161,8 +179,10 @@ search does not run on HiveOS at all (no Vulkan driver library there).
 | CMP 50HX | лок 1470 + `--auto-uv` | 4,9 | 102–109 | 0,046 |
 | CMP 50HX | лок 1800 + `--auto-uv` (максимум скорости; оффсет упирается в минимум напряжения) | 6,0–6,15 | 171–195 | 0,033 |
 | RTX 4070 Laptop | сток | 5,0–5,2 | 90–100 | 0,052 |
+| RTX 3070 | 0.2.2 группировка, лок 1800 / память 810, соло | 7,11 | 146 | 0,0486 |
+| RTX 3070 | 0.2.2 группировка, лок 1800 / память 810, пул | 6,08 | 145 | 0,0420 |
 
-Майнинг в пул (ядро t1p); соло через ноду или ffgt-gate примерно на 4 % быстрее на той же частоте (ядро t1). Хешрейт растёт
+Строки без 0.2.2 — по одному шаблону (0.2.1 / `--no-group`). Майнинг в пул (ядро t1p); соло через ноду или ffgt-gate примерно на 4 % быстрее на той же частоте (ядро t1). Хешрейт растёт
 линейно с частотой ядра; андервольт (`--auto-uv`) экономит 30–40 % мощности при том же хешрейте.
 Для сравнения: официальный ting-miner
 (wgpu) на RTX 4070 Laptop даёт 2,04 GH/s против 5,0 у FFGT, а в HiveOS его GPU-поиск не запускается вовсе (нет

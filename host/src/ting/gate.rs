@@ -17,6 +17,10 @@
 //! Jobs: per node the gate polls `status` every 250 ms and takes a template on a new tip (clean job) or every 20 s; job =
 //! [id, header[0..278], height, network target, clean].  Each connection gets its own 4-byte extranonce1 (nonce bytes
 //! 12..15).  A share is re-hashed here; one that meets the network target goes to its node as `solution`.
+//! 0.2.2 (template grouping): a template per second; every new one goes out as a job with clean = false, so a rig's FFGT
+//! keeps up to 7 jobs of the tip (its Ring, node.rs) and searches them together; a block on any of them goes to the node
+//! with that job's template id.  The node keeps 8 templates per tip: no other client may take templates from a node a
+//! gate serves (a second miner on it evicts the rigs' templates).
 use super::node::{self, Template};
 use super::pool::diff_to_target;
 use super::pow;
@@ -30,11 +34,16 @@ use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 const KEEP_JOBS: usize = 16;
+/// jobs re-sent to a rig after a difficulty change (its group restarts with the new share target): its Ring size
+const RESEND: usize = super::node::GROUP_KEEP;
+/// a share found just before a difficulty change still counts at the previous difficulty for this long
+const DIFF_GRACE: Duration = Duration::from_secs(10);
 const TARGET_SECS: f64 = 10.0;
 const RETARGET: Duration = Duration::from_secs(90);
 
 struct GJob {
     id: String,
+    seq: u64,
     tpl: Arc<Template>,
     clean: bool,
 }
@@ -58,7 +67,11 @@ struct WorkerStat {
     last: Option<Instant>,
     blocks: u64,
     conns: u32,
+    recent: VecDeque<(Instant, f64)>, // the shares of the last RECENT (time, hashes): the current rate, without the gaps
 }
+
+/// window of the recent hash rate estimate (the lifetime one counts the time a rig was away, e.g. on another coin)
+const RECENT: Duration = Duration::from_secs(900);
 
 struct Gate {
     nodes: HashMap<String, Arc<NodeState>>,
@@ -163,17 +176,23 @@ fn poll(g: &Gate, ns: &NodeState) {
                     continue;
                 }
                 let changed = t != cur_tip;
-                if changed || last.is_none_or(|l| l.elapsed() >= node::REFRESH) {
+                if changed || last.is_none_or(|l| l.elapsed() >= node::refresh()) {
                     match node::template(&ns.node) {
                         Ok(tpl) => {
                             cur_tip = t;
                             last = Some(Instant::now());
-                            let id = format!("{:08x}", g.job_seq.fetch_add(1, Ordering::Relaxed));
                             let mut q = ns.jobs.write().unwrap();
                             if changed {
                                 q.clear();
+                            } else if q.iter().any(|j| j.tpl.id == tpl.id) {
+                                // the node handed out the same template again (nothing changed): no new job
+                                drop(q);
+                                std::thread::sleep(node::POLL);
+                                continue;
                             }
-                            q.push_back(Arc::new(GJob { id, tpl: Arc::new(tpl), clean: changed }));
+                            let seq = g.job_seq.fetch_add(1, Ordering::Relaxed);
+                            let id = format!("{seq:08x}");
+                            q.push_back(Arc::new(GJob { id, seq, tpl: Arc::new(tpl), clean: changed }));
                             while q.len() > KEEP_JOBS {
                                 q.pop_front();
                             }
@@ -209,7 +228,10 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
     let en1 = g.en1.fetch_add(1, Ordering::Relaxed).to_be_bytes();
     let mut worker: Option<(String, Arc<NodeState>)> = None;
     let mut diff = g.diff0;
+    let mut prev_diff = diff;
+    let mut diff_at: Option<Instant> = None;
     let mut seen_ver = 0u64;
+    let mut sent_seq = 0u64; // the newest job sent to this rig
     let mut buf = String::new();
     let mut last_rx = Instant::now();
     let mut dup: HashSet<[u8; 16]> = HashSet::new();
@@ -221,12 +243,25 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
                 let v = ns.version.load(Ordering::SeqCst);
                 if v != seen_ver {
                     seen_ver = v;
-                    let j = ns.jobs.read().unwrap().back().cloned();
-                    if let Some(j) = j {
-                        if j.clean {
+                    // every job not yet sent, oldest first (grouping: the rig keeps them all); from the last clean one on,
+                    // and on a fresh connection the tip's newest RESEND (the first of them clean)
+                    let q: Vec<Arc<GJob>> = ns.jobs.read().unwrap().iter().cloned().collect();
+                    let mut new: Vec<Arc<GJob>> = q.into_iter().filter(|j| j.seq > sent_seq).collect();
+                    if let Some(c) = new.iter().rposition(|j| j.clean) {
+                        new.drain(..c);
+                    }
+                    let fresh = sent_seq == 0;
+                    let keep = if super::grouping() { RESEND } else { 1 };
+                    if new.len() > keep {
+                        new.drain(..new.len() - keep);
+                    }
+                    for (k, j) in new.iter().enumerate() {
+                        let clean = j.clean || (fresh && k == 0);
+                        if clean {
                             dup.clear();
                         }
-                        notify(&mut w, &j, j.clean)?;
+                        notify(&mut w, j, clean)?;
+                        sent_seq = j.seq;
                     }
                 }
                 // vardiff
@@ -236,10 +271,16 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
                     let want = if win_shares == 0 { diff / 4.0 } else { diff * rate * TARGET_SECS };
                     let nd = want.clamp(diff / 4.0, diff * 4.0).clamp(0.1, 100000.0);
                     if (nd / diff - 1.0).abs() > 0.3 {
+                        prev_diff = diff;
+                        diff_at = Some(Instant::now());
                         diff = (nd * 1000.0).round() / 1000.0;
                         send(&mut w, &json!({"jsonrpc":"2.0","method":"mining.set_difficulty","params":[diff],"id":null}))?;
-                        if let Some(j) = ns.jobs.read().unwrap().back().cloned() {
-                            notify(&mut w, &j, false)?;
+                        // the rig takes the new share target with the next job: re-send the tip's jobs (its group
+                        // restarts with the new target and gets all of them back)
+                        let q: Vec<Arc<GJob>> = ns.jobs.read().unwrap().iter().cloned().collect();
+                        let keep = if super::grouping() { RESEND } else { 1 };
+                        for j in q.iter().skip(q.len().saturating_sub(keep)) {
+                            notify(&mut w, j, false)?;
                         }
                     }
                     (win_start, win_shares) = (Instant::now(), 0);
@@ -293,6 +334,7 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
                     let jid = v["params"][1].as_str().unwrap_or("");
                     let nonce: Option<[u8; 16]> = v["params"][2].as_str().and_then(pow::unhex).and_then(|b| b.try_into().ok());
                     let job = ns.jobs.read().unwrap().iter().find(|j| j.id == jid).cloned();
+                    let mut credit = diff;
                     let verdict: Result<(), (i32, &str)> = (|| {
                         let job = job.as_ref().ok_or((21, "job not found (stale)"))?;
                         let nonce = nonce.ok_or((20, "bad nonce (32 hex)"))?;
@@ -304,7 +346,12 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
                         }
                         let bid = pow::block_id(&job.tpl.header, &nonce);
                         if !pow::meets(&bid, &diff_to_target(diff)) {
-                            return Err((23, "low difficulty share"));
+                            // found before the rig took a raised difficulty: counts at the previous one for a while
+                            let grace = diff_at.is_some_and(|t| t.elapsed() < DIFF_GRACE) && prev_diff < diff && pow::meets(&bid, &diff_to_target(prev_diff));
+                            if !grace {
+                                return Err((23, "low difficulty share"));
+                            }
+                            credit = prev_diff;
                         }
                         if pow::meets(&bid, &job.tpl.target) {
                             let n = pow::nonce_u128(&nonce);
@@ -328,7 +375,11 @@ fn conn(g: &Gate, s: TcpStream) -> Result<()> {
                         Ok(()) => {
                             win_shares += 1;
                             ws.shares += 1;
-                            ws.work += diff * 4294967296.0;
+                            ws.work += credit * 4294967296.0;
+                            ws.recent.push_back((Instant::now(), credit * 4294967296.0));
+                            while ws.recent.front().is_some_and(|x| x.0.elapsed() > RECENT) {
+                                ws.recent.pop_front();
+                            }
                             ws.since.get_or_insert(Instant::now());
                             ws.last = Some(Instant::now());
                             drop(st);
@@ -365,7 +416,7 @@ fn summary(g: &Gate) -> Value {
         .iter()
         .map(|(n, w)| {
             let el = w.since.map_or(0.0, |s| s.elapsed().as_secs_f64()).max(1.0);
-            (n.clone(), json!({"node": g.workers.get(n).map(|x| x.0.clone()), "connections": w.conns, "shares": w.shares, "rejected": w.rejected, "blocks": w.blocks, "hashrate_ghs_est": (w.work / el / 1e9 * 1000.0).round() / 1000.0, "last_share_s": w.last.map(|l| l.elapsed().as_secs())}))
+            (n.clone(), json!({"node": g.workers.get(n).map(|x| x.0.clone()), "connections": w.conns, "shares": w.shares, "rejected": w.rejected, "blocks": w.blocks, "hashrate_ghs_est": (w.work / el / 1e9 * 1000.0).round() / 1000.0, "hashrate_ghs_15min": recent_ghs(w), "last_share_s": w.last.map(|l| l.elapsed().as_secs())}))
         })
         .collect::<serde_json::Map<_, _>>()
         .into();
@@ -395,4 +446,11 @@ fn api(bind: &str, g: &Gate) {
         let body = summary(g).to_string();
         let _ = c.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
     }
+}
+
+/// The rate of the last RECENT of shares (GH/s): what the rig mines now, not since the gate started.
+fn recent_ghs(w: &WorkerStat) -> f64 {
+    let r: f64 = w.recent.iter().filter(|x| x.0.elapsed() <= RECENT).map(|x| x.1).sum();
+    let span = w.since.map_or(1.0, |s| s.elapsed().as_secs_f64()).clamp(1.0, RECENT.as_secs_f64());
+    (r / span / 1e9 * 1000.0).round() / 1000.0
 }
